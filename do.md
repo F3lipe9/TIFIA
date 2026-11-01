@@ -1,15 +1,17 @@
 # What's left to finish Phase 0
 
-As of November 1, 2026. Read with `PHASE0.md`, which sets the requirements; this file says
-what is already done and what you (F), your cofounder (C) and the advisor (A) still need to
-do, in order. Commands run from `tifia-review/`.
+As of November 1, 2026 (evening). Read with `PHASE0.md`, which sets the requirements;
+this file says what is already done and what you (F), your cofounder (C) and the advisor
+(A) still need to do, in order. Commands run from `tifia-review/`.
 
 ## The short version
 
-The code for weeks 1–8 is written and tested (173 tests pass). What remains is mostly
-work only people can do, plus a few decisions:
+The code for weeks 1–8 is written and tested, and so is the two-page executive summary
+from `Summary_Report.md` (210 tests pass). The Anthropic API key works: the classifier and
+the summary have run end to end on the HRTAC draft agreement. What remains is mostly work
+only people can do, plus a few decisions:
 
-1. Put an API key in `.env`, so the classifier can run (15 minutes).
+1. Commit today's work (see "Since the last update" below).
 2. Hold the taxonomy meeting with the advisor, and get the accuracy threshold agreed in
    writing (week 6).
 3. Get the advisor labeling agreements now: it is the longest wait, and it must happen
@@ -22,6 +24,38 @@ work only people can do, plus a few decisions:
 The critical path is the advisor's answer keys. Everything from week 8 on waits for them,
 so start that today, in parallel with everything else.
 
+## Since the last update
+
+- **LLM: back on Claude.** The project briefly switched to Gemini and was switched back:
+  `config.yaml` uses `claude-sonnet-5-5` at medium effort. The Gemini client is still in
+  the code as an unused option (`llm.provider: gemini`).
+- **Faster classification.** Calls now go out 3 at a time (`llm.max_workers`), with
+  retries on rate limits (`llm.api_retries`). A full agreement took about 2 minutes and
+  $1.13 (HRTAC: 609 deviations, 37 calls), much less than the earlier $3 estimate. If
+  runs show no rate-limit errors, `max_workers` can go to 5–6.
+- **New agreement: HRTAC.** `tla_2025_hrtac_draft_body`: the Hampton Roads Transportation
+  Accountability Commission's 2025 toll-revenue loan, a different borrower from Sound
+  Transit. Two limits: it is a **draft** (amount in brackets, rate and date blank), and
+  the PDF is the **body only**, with no exhibits, so the template's 28 exhibit and
+  schedule sections show up as "removed". It is typed `executed` in the manifest so the
+  pipeline compares it.
+- **Executive summary built** (`Summary_Report.md`). Every run now also writes
+  `outputs/reports/<doc_id>_summary.pdf`: one row per topic, each line checked against
+  quotes from the agreement, at most two pages, about $0.13 per agreement. Departures
+  from the plan: the debt service exhibit is found by its heading (it is Exhibit F in the
+  Sound Transit PDFs, and they only say "[Attached.]"); borrowing authority counts only
+  §13(a), §13(b) and §12(a)(xix), since counting all of §12–13 gave a misleading 50
+  changes; exhibits missing from a body-only PDF are not listed as significant changes.
+- **`outputs/` was cleared.** Every report, the LLM cache and the cost ledger were
+  deleted. The next run of each agreement pays for its labels again, and
+  `llm_usage.csv` restarts at $0; about $1.64 was spent before that, so add it to the
+  total by hand.
+- **READMEs rewritten:** `README.md` is the project overview; `tifia-review/README.md`
+  covers setup and the pipeline.
+- **Not committed yet.** All of this is uncommitted work on the branch named `gemini`,
+  which now holds the Claude setup. Commit it, and consider renaming the branch or
+  merging it into `main`.
+
 ---
 
 ## 1. Where things stand
@@ -32,25 +66,26 @@ Each "done when" item from `PHASE0.md`. ✅ done · ⚠️ partly done or open �
 |---|---|---|
 | 1 | `pytest` runs; `models.py` imports | ✅ |
 | 1 | Fixture PDFs and `expected_deviations.json` exist | ✅ Five fixtures, built from the real template rather than the short HTML/WeasyPrint template the plan describes, which makes them a harder test. |
-| 1 | Template + at least 2 executed agreements in `data/` with manifest rows | ✅ 2 templates and 4 agreements. ⚠️ All 4 are Sound Transit agreements signed the same day, so they are near-duplicates (see step 4). |
+| 1 | Template + at least 2 executed agreements in `data/` with manifest rows | ✅ 2 templates and 5 agreements. ⚠️ 4 are Sound Transit agreements signed the same day (near-duplicates); the 5th, HRTAC, is a different borrower but a body-only draft (see step 4). |
 | 1 | C asks the advisor whether older template versions exist | ⬜ This matters: the 2021 agreements predate the 2023 template (see decision D2). |
 | 2 | Loader tests pass; every document inspected; stages save and load JSON | ✅ `docs/extraction-notes.md` |
-| 2 | C collects agreements 3–5 | ⚠️ 4 agreements, one borrower |
+| 2 | C collects agreements 3–5 | ⚠️ 5 agreements, two borrowers; HRTAC is a draft without exhibits |
 | 3 | Fixture segmentation exact; template matches its TOC; definitions parsed | ✅ |
 | 4 | Fixtures: renumbered section matched, added/removed reported | ✅ |
 | 4 | Real agreement: ≥ 90% of alignments correct by hand-check | ⚠️ Claude marked Federal Way: 81.2% strict, 90.7% if merged/split clauses are left out. **You need to audit the marks and decide** (step 2). |
 | 5 | All six fixture changes detected; fill-in labeled as such | ✅ |
 | 5 | Deviation list on a real agreement is mostly real changes | ✅ About 1.4% punctuation-only on DRLE, and all of those are real edits. |
-| 6 | Every deviation on one agreement labeled or `needs_review` | ⬜ Code done. Not run yet: no API key. |
-| 6 | All evidence quotes verified | ⬜ Automatic once it runs. |
+| 6 | Every deviation on one agreement labeled or `needs_review` | ⚠️ Done on HRTAC with the draft taxonomy (524 labeled by Claude, 2 needs review). Still to do on DRLE with the final taxonomy, and read by hand (step 3). |
+| 6 | All evidence quotes verified | ✅ Enforced by the classifier; held on the HRTAC run. |
 | 6 | Accuracy threshold agreed with the advisor, in writing | ⬜ C + A |
 | 6 | Taxonomy meeting held, final categories written down | ⬜ Draft ready: `docs/taxonomy-draft.md`. |
-| 7 | `python scripts/run.py` produces a PDF for every agreement | ✅ Made with `--no-llm` (no labels yet). Printed by headless Edge because WeasyPrint can't load (optional fix: step 6). |
-| 7 | Reports readable, every flag has citations | ⚠️ Citations checked on every deviation. Readability needs a look once the reports are classified. |
+| 7 | `python scripts/run.py` produces a PDF for every agreement | ✅ Works, now with an executive summary too. ⚠️ `outputs/` was cleared, so no reports exist right now; regenerate them in step 6. Printed by headless Edge because WeasyPrint can't load (optional fix: step 6). |
+| 7 | Reports readable, every flag has citations | ⚠️ Citations checked on every deviation. The classified HRTAC report and summary looked sensible; read the others once they are classified. |
 | 7 | C sends the advisor the answer-key template | ⬜ Ready: `data/gold/gold_template.csv` and `INSTRUCTIONS.md`. |
 | 8 | Accuracy recorded against the threshold; every error has a cause; time comparison recorded | ⬜ Evaluator and commands ready (`docs/evaluation.md`). Needs the answer keys. |
 | 9 | Held-out accuracy recorded; 2–3 demos with feedback and price reactions | ⬜ |
 | 10 | Decision memo with the gate table | ⬜ |
+| — | Executive summary (`Summary_Report.md`): ≤ 2 pages, every row verified or marked, counts match the full report | ✅ Built and run on HRTAC: 2 pages, all 9 rows verified. ⬜ Hand-check every row on 2 agreements (step 3b); Exhibit G digest untested on a real schedule (none of the PDFs has one). |
 
 ---
 
@@ -81,15 +116,9 @@ Two ordering rules from PHASE0 shape this:
 
 ### Step 0 — This week: unblock everything (F + C, about 1 hour)
 
-- [ ] **F: API key.** Create a key in the Anthropic Console, then:
-  ```
-  copy .env.example .env      # then edit .env: LLM_API_KEY=sk-ant-...
-  python scripts/classify_documents.py fx_03_modified --dry-run   # what it will send
-  python scripts/classify_documents.py fx_03_modified             # one call, about $0.01
-  ```
-  Open `outputs/classify/fx_03_modified__vs__...csv`. Two deviations should have categories,
-  explanations and evidence quotes, and two should be fill-ins. Every run's cost goes to
-  `outputs/llm_usage.csv` with the running total against the $300 budget.
+- [x] **F: API key.** Done: the Anthropic key in `.env` works (HRTAC ran end to end).
+- [ ] **F: commit today's work** (parallel classification, HRTAC manifest row, executive
+  summary, READMEs) and decide what to do with the `gemini` branch name.
 - [ ] **F + C: decide which template each agreement is compared against** (decision D2),
   because the advisor must label against the same template the tool uses. It is the
   manifest's `template` column, currently the project-revenue template for all four.
@@ -124,6 +153,9 @@ questions to ask. The main open questions:
 - Are cross-reference and caption updates substantive? Is dropping a template provision
   that doesn't fit the deal substantive? Are new deal-specific definitions substantive?
 - Is one sentence the right length for an explanation?
+- For the executive summary: which categories rank first in "Other significant changes"
+  (`summary.category_priority`, a placeholder now), and is the topic list right? The plan
+  noted that covenants and security are not topics of their own.
 
 After the meeting:
 
@@ -158,20 +190,46 @@ Claude marked all 431 Federal Way alignment rows
   clean for the hold-out, step 4). This is optional for Phase 0; if time is short, list
   it as a known limitation.
 
-### Step 3 — Week 6 finish: label one agreement and read every label (F, 1.5 hours, about $3)
+### Step 3 — Week 6 finish: label one agreement and read every label (F, 1.5 hours, about $1.50)
 
-- [ ] Run the classifier on DRLE with the final taxonomy:
+- [ ] Run the classifier on DRLE with the final taxonomy. `outputs/` was cleared, so the
+  stage scripts must run first to make the inputs `classify_documents.py` reads:
   ```
+  python scripts/segment_documents.py
+  python scripts/align_documents.py
+  python scripts/diff_documents.py
   python scripts/classify_documents.py tla_2021_drle --dry-run   # about 43 calls
-  python scripts/classify_documents.py tla_2021_drle
+  python scripts/classify_documents.py tla_2021_drle             # about 2 minutes
   ```
+  (`python scripts/run.py tla_2021_drle` also labels it, with the report and summary, but
+  without the review CSV.)
 - [ ] **Read every label** in `outputs/classify/tla_2021_drle__vs__...csv` (week 6, step
   5). Fill in `category_ok`, `substantive_ok`, `explanation_ok` and `notes`. Look for:
   - categories that don't fit the definitions;
   - explanations that claim more than the text says;
   - "needs review" items, and why.
 - [ ] If a category keeps going wrong, the fix is usually in its definition in
-  `config.yaml`. Changing it re-labels on the next run, costing another ~$3.
+  `config.yaml`. Changing it re-labels on the next run, costing another ~$1.25.
+
+### Step 3b — Executive summary: hand-check every row (F, 1.5 hours)
+
+From `Summary_Report.md` (steps 7–8). The summary is built and was run on HRTAC; nobody
+has checked its rows against the agreement yet.
+
+- [ ] Run DRLE and one other non-held-out agreement with `python scripts/run.py <doc_id>`,
+  then open `outputs/<run_id>/<doc_id>/summary.json` next to the agreement. Each row has
+  its quotes and pages: check that the summary line says what the quotes say, and that
+  the "changed from template" count matches the full report. Record errors in
+  `docs/evaluation.md`.
+- [ ] Read each summary as an executive would: is the bottom line fair, is anything
+  missing or misleading?
+- [ ] Exhibit G: the Sound Transit PDFs only say "[Attached.]", so the digest should say
+  "not yet inserted". If C can get the HRTAC agreement **with** exhibits, put its path in
+  the manifest's `full_path` column; the plan expects "[to be inserted]" there too. No
+  document so far has a real debt service table, so the table reader is tested only on a
+  fixture.
+- [ ] Don't generate the held-out agreement's summary until its score is recorded (the
+  pipeline skips agreements in `evaluation.holdout`).
 
 Done when: every deviation is labeled or marked needs review, and there are no unverified
 evidence quotes (the classifier enforces this).
@@ -181,7 +239,10 @@ evidence quotes (the classifier enforces this).
 - [ ] **Which agreements the advisor labels.** PHASE0 asks for 3–5. All four Sound Transit
   agreements were drafted together and are nearly identical, so a score on one says
   little about the others. If C can find agreements from other public borrowers, include
-  1–2 of them; that is a much more convincing test. Add each one to `data/agreements/`
+  1–2 of them; that is a much more convincing test. **HRTAC is now in the repo** as a second
+  borrower, but it is a draft and body-only: if the advisor labels it, label the body
+  only (or get the full agreement), or the 28 missing exhibit sections will count as
+  false flags. It has already been run and looked at, so it is not a clean hold-out. Add each one to `data/agreements/`
   and `data/manifest.csv` (with `title` and `template` columns), then run
   `python scripts/run.py <doc_id> --no-llm` to check it reads, segments and aligns
   sensibly. If you plan to hold one of them out, only check that it runs without errors,
@@ -234,8 +295,9 @@ Things to expect, so they don't surprise you:
   fx_05_definition tla_2021_drle tla_2021_federal_way tla_2021_northgate`.
 
   A bare `python scripts/run.py` would also run the held-out agreement, and its report is
-  for week 9. This costs about $3 per real agreement the first time, then reuses the
-  cache. Skim each PDF. Is it readable? Is the needs-review section sensible? Do the
+  for week 9. This costs about $1.25 per real agreement the first time (labels plus
+  summary), then reuses the cache. Add `tla_2025_hrtac_draft_body` if it is in the
+  labeling set. Skim each PDF. Is it readable? Is the needs-review section sensible? Do the
   categories group well?
 - [ ] Optional: switch the PDF renderer to WeasyPrint, as the plan specifies:
   1. In MSYS2, run `pacman -S mingw-w64-ucrt-x86_64-pango`. This may update MSYS2
@@ -263,6 +325,9 @@ Things to expect, so they don't surprise you:
 - [ ] **Demos (F + C, 15 minutes each, 2–3 advisors from the interviews):**
   1. Two minutes on the problem in their words, from their interview.
   2. Walk through one report: summary, a defined-term change, one category, needs review.
+     Then the two-page executive summary, presented as something the advisor would hand
+     to their client. Ask the `Summary_Report.md` questions: "Would you send this to your
+     client as is? Is anything wrong or missing? Which rows would your client read?"
   3. Ask: "Is this accurate? Would this save you time? What's missing?"
   4. **Ask about price:** "If it did this reliably, would you pay $X per deal or per seat?"
      Decide on X beforehand.
@@ -301,30 +366,37 @@ without new evidence (PHASE0 week 10 pitfalls).
 
 | # | Decision | Recommendation |
 |---|---|---|
-| D1 | Which model classifies (`config.yaml` `llm.model`, now `claude-sonnet-5-5`) | Keep it. About $3 per agreement keeps the whole phase far under $300. Claude Opus 5.5 would cost about twice as much. |
+| D1 | Which model classifies (`config.yaml` `llm.model`, now `claude-sonnet-5-5`) | Keep it. About $1.25 per agreement (labels plus summary) keeps the whole phase far under $300. Claude Opus 5.5 would cost about twice as much. |
 | D2 | Which template the 2021 agreements are compared against | Decide before the advisor labels. They are tax-backed and predate the 2023 templates, so many deviations are template-version differences, not negotiation. Options: an older template if the advisor can get one (best), the non-project template, or the project template (current). Change the manifest's `template` column. |
 | D3 | How to read the week-4 hand-check (81.2% strict, 90.7% without merged/split clauses) | Audit the marks first. Report both numbers in the memo, and treat merged or split clauses as the known limitation the plan already names. |
 | D4 | Which agreement is held out | O&M Facility East, or a new borrower's agreement if one turns up. Decide before scoring. |
 | D5 | Whether to install WeasyPrint | Optional. Edge's output already meets the week-7 requirements. |
+| D6 | HRTAC's role: in the advisor's labeling set, or a demo document only | Include it if the full agreement (with exhibits) can be found, since it is the only other borrower. As a body-only draft, use it for demos and the summary, and label only its body if at all. |
+| D7 | Summary topics and their scope (`config.yaml` `summary`) | Keep the nine topics plus "Other significant changes" for now; settle `category_priority` at the taxonomy meeting. Borrowing authority counts §13(a), §13(b) and §12(a)(xix) only. |
 
 ## 5. Time and money
 
-- **Your time (F):** about 15–20 hours from here: step 0 (0.5), step 1 (1.5), step 2
-  (1.5–3), step 3 (1.5), step 5 (4), step 6 (1), step 7 (5), step 8 (shared, 3). At 5
-  hours a week that is 3–4 weeks of work. The calendar depends on the advisor's labeling.
+- **Your time (F):** about 17–22 hours from here: step 0 (0.5), step 1 (1.5), step 2
+  (1.5–3), step 3 (1.5), step 3b (1.5), step 5 (4), step 6 (1), step 7 (5), step 8
+  (shared, 3). At 5 hours a week that is 3–5 weeks of work. The calendar depends on the advisor's labeling.
 - **Advisor (A):** the 1-hour taxonomy meeting, labeling 3–5 agreements (the big one: ask
   them for an estimate), and the review-time question.
 - **Cofounder (C):** the answer-key package, scheduling, the agreement search, interviews,
   demos and follow-ups.
-- **LLM spend:** about $0.01 per fixture and about $3 per real agreement the first time.
-  Reruns are free unless the text, prompt, taxonomy or model changes. Expect $20–50 for
-  the rest of Phase 0, depending on how often the taxonomy and the week-9 fixes force
-  re-labeling. It is tracked in `outputs/llm_usage.csv`.
+- **LLM spend:** about $0.01 per fixture and about $1.25 per real agreement the first
+  time ($1.13 for labels, $0.13 for the summary, on HRTAC). Reruns are free unless the
+  text, prompt, taxonomy or model changes. Expect $10–30 for the rest of Phase 0,
+  depending on how often the taxonomy and the week-9 fixes force re-labeling. It is
+  tracked in `outputs/llm_usage.csv`, which restarted at $0 when `outputs/` was cleared;
+  $1.64 was spent before that.
 
 ## 6. If you fall behind
 
 From `PHASE0.md`: cut the embedding fallback first (it is already built, so nothing to
-cut), then the category accuracy metric, then report polish.
+cut), then the category accuracy metric, then report polish. The executive summary is
+outside the go/no-go gate: if time is short, skip its hand-check (step 3b) before
+anything on the critical path, and leave it out of the demos rather than show unchecked
+rows.
 
 **Never cut:**
 
@@ -337,7 +409,9 @@ cut), then the category accuracy metric, then report polish.
 
 | What | Where |
 |---|---|
-| Run everything, one PDF per agreement | `python scripts/run.py [doc_id ...] [--no-llm]`, output in `outputs/reports/` |
+| Run everything: report and summary per agreement | `python scripts/run.py [doc_id ...] [--no-llm]`, output in `outputs/reports/` |
+| Executive summary: rows, quotes and pages | `outputs/<run_id>/<doc_id>/summary.json`; plan in `Summary_Report.md`; settings in `config.yaml` `summary` |
+| Setup and pipeline guide | `tifia-review/README.md` |
 | Classify only, with a cost estimate | `python scripts/classify_documents.py <doc_id> [--dry-run] [--limit N]` |
 | Score against answer keys | `python scripts/evaluate.py [doc_id ...] [--holdout] [--causes errors.csv]` |
 | Tests | `python -m pytest -q` |

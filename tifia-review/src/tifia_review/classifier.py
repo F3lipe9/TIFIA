@@ -9,6 +9,11 @@ template text when there is no executed text) after diff_engine.normalize. A dev
 that fails is sent once more with the problem; if it fails again, or the answer is
 "unclear", it is marked needs_review.
 
+Batches can go out in parallel (llm.max_workers). Only the requests run in worker
+threads: answers are checked, cached and counted on the calling thread, in batch order,
+so the cache (a SQLite connection that belongs to one thread) is written from one place
+and a run gives the same labels, retries and output order however the requests finish.
+
 Labels that pass are cached by a hash of the prompt version, the model and the deviation
 as sent (its texts, sections and defined term), so a rerun costs nothing and a changed
 prompt or taxonomy misses the cache. Failures are not cached, so a rerun tries them again.
@@ -19,6 +24,7 @@ import json
 import logging
 from collections import Counter
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 
 from tifia_review.diff_engine import normalize
 from tifia_review.llm.client import LLMClient, LLMError
@@ -42,12 +48,14 @@ _Pending = tuple[Deviation, dict, str]  # deviation, item sent to the LLM, cache
 class Classifier:
     def __init__(self, client: LLMClient, taxonomy: dict[str, str], substantive: str,
                  cache: ResultCache | None = None, batch_size: int = 15,
-                 max_batch_chars: int = 40_000, max_retries: int = 1):
+                 max_batch_chars: int = 40_000, max_retries: int = 1, max_workers: int = 1):
         """taxonomy: category name -> definition; substantive: the definition of a
-        substantive change. Both go into the system prompt."""
+        substantive change. Both go into the system prompt. max_workers: requests in
+        flight at once."""
         self.client, self.cache = client, cache
         self.batch_size, self.max_batch_chars, self.max_retries = (
             batch_size, max_batch_chars, max_retries)
+        self.max_workers = max(1, max_workers)
         self.categories = [*taxonomy, UNCLEAR]
         self.system = build_system_prompt(taxonomy, substantive)
         self.schema = label_schema(self.categories)
@@ -63,7 +71,8 @@ class Classifier:
         return cls(client, config["taxonomy"], config["substantive"], cache,
                    batch_size=llm.get("batch_size", 15),
                    max_batch_chars=llm.get("max_batch_chars", 40_000),
-                   max_retries=llm.get("max_retries", 1))
+                   max_retries=llm.get("max_retries", 1),
+                   max_workers=llm.get("max_workers", 1))
 
     def classify(self, deviations: list[Deviation], template: SegmentedDocument | None = None,
                  executed: SegmentedDocument | None = None) -> list[LabeledDeviation]:
@@ -79,8 +88,8 @@ class Classifier:
             if attempt:
                 self.stats["retried"] += len(pending)
             failed = []
-            for batch in self._batches(pending):
-                answers = self._ask(batch, problems)
+            batches = list(self._batches(pending))
+            for batch, answers in zip(batches, self._ask_all(batches, problems)):
                 for d, item, key in batch:
                     label, problem = answers[d.deviation_id]
                     if problem is None:
@@ -163,11 +172,31 @@ class Classifier:
         if batch:
             yield batch
 
+    def _ask_all(self, batches: list[list[_Pending]], problems: dict[str, str]
+                 ) -> Iterator[dict[str, tuple[dict | None, str | None]]]:
+        """_ask for each batch, up to max_workers at a time; answers come back in batch
+        order as they are ready. The messages are built here, before any worker starts,
+        so workers only send requests and read nothing that changes."""
+        messages = [[dict(item, previous_problem=problems[d.deviation_id])
+                     if d.deviation_id in problems else item for d, item, _ in batch]
+                    for batch in batches]
+        if self.max_workers == 1 or len(batches) < 2:
+            yield from map(self._ask, batches, messages)
+            return
+        pool = ThreadPoolExecutor(max_workers=min(self.max_workers, len(batches)),
+                                  thread_name_prefix="classify")
+        try:
+            yield from pool.map(self._ask, batches, messages)
+        finally:
+            # after an API error (bad key, rate limits past the retries) or Ctrl+C, send
+            # nothing more: requests not started are dropped, the ones in flight finish
+            pool.shutdown(wait=True, cancel_futures=True)
+
     def _ask(self, batch: list[_Pending],
-             problems: dict[str, str]) -> dict[str, tuple[dict | None, str | None]]:
-        """deviation id -> (label, problem); problem is None if the label passed."""
-        items = [dict(item, previous_problem=problems[d.deviation_id])
-                 if d.deviation_id in problems else item for d, item, _ in batch]
+             items: list[dict]) -> dict[str, tuple[dict | None, str | None]]:
+        """deviation id -> (label, problem); problem is None if the label passed.
+        items: the batch as sent, with any previous problem. Runs in a worker thread:
+        it must not write to the cache or the stats."""
         try:
             reply = self.client.complete_json(self.system, render_batch(items), self.schema)
         except LLMError as e:

@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Summary: {{ s.meta.agreement_id }}</title>
+<style>
+@page {
+  size: Letter;
+  margin: 0.55in 0.6in 0.7in;
+  @bottom-left { content: "{{ s.disclaimer }}"; font: 7.5pt "Segoe UI", Arial, sans-serif; color: #9b1c1c; }
+  @bottom-right { content: "Page " counter(page) " of " counter(pages); font: 7.5pt "Segoe UI", Arial, sans-serif; color: #555; }
+}
+html { font-size: {{ "8pt" if s.level >= 3 else "9pt" }}; }
+body { margin: 0; font-family: "Segoe UI", Arial, Helvetica, sans-serif; line-height: 1.32; color: #1a1a1a; }
+h1 { font-size: 16pt; color: #1f3a5f; margin: 0 0 2pt; }
+.sub { color: #333; margin: 0 0 6pt; }
+table.head { border-collapse: collapse; margin: 0 0 8pt; }
+table.head th { text-align: left; color: #555; font-weight: 600; padding: 1pt 12pt 1pt 0; vertical-align: top; white-space: nowrap; }
+table.head td { padding: 1pt 0; vertical-align: top; }
+.bottom { border-left: 3.5pt solid #1f3a5f; background: #f2f5f9; padding: 6pt 9pt; margin: 0 0 9pt; font-size: 1.05em; }
+.bottom b { color: #1f3a5f; }
+table.rows { width: 100%; border-collapse: collapse; table-layout: fixed; }
+table.rows th { background: #1f3a5f; color: #fff; text-align: left; padding: 3pt 5pt; font-weight: 600; font-size: 0.9em; }
+table.rows td { border-bottom: 0.6pt solid #c9d1db; padding: 4pt 5pt; vertical-align: top; }
+table.rows tr { break-inside: avoid; }
+td.topic { font-weight: 600; color: #1f3a5f; }
+td.src { color: #555; font-size: 0.88em; }
+td.chg { font-size: 0.92em; }
+.std { color: #2f6b2f; }
+.sub-chg { color: #8a1c1c; }
+.fallback { color: #8a4b05; font-style: italic; }
+.digest { margin: 3pt 0 0; padding: 0; list-style: none; font-size: 0.92em; color: #333; }
+.digest li:before { content: "▪ "; color: #1f3a5f; }
+ul.other { margin: 0; padding-left: 12pt; }
+ul.other li { margin: 0 0 2pt; }
+.id { color: #666; font-size: 0.9em; }
+.foot { margin-top: 8pt; font-size: 0.88em; color: #444; border-top: 0.75pt solid #999; padding-top: 4pt; }
+.warn { color: #9b1c1c; font-weight: 600; }
+</style>
+</head>
+<body>
+<h1>Executive summary</h1>
+<div class="sub">{{ s.meta.agreement_title }}</div>
+<table class="head">
+  <tr><th>Borrower</th><td>{{ s.meta.borrower or "See agreement preamble" }}</td></tr>
+  <tr><th>Lender</th><td>{{ s.meta.lender or "See agreement preamble" }}</td></tr>
+  <tr><th>Agreement date</th><td>{{ s.meta.date }}</td></tr>
+  <tr><th>Compared with</th><td>{{ s.meta.template_title }}</td></tr>
+</table>
+
+<div class="bottom"><b>Bottom line.</b> {{ s.bottom_line }}</div>
+
+<table class="rows">
+  <colgroup><col style="width:17%"><col style="width:47%"><col style="width:22%"><col style="width:14%"></colgroup>
+  <tr><th>Topic</th><th>What the agreement says</th><th>Changed from template</th><th>Source</th></tr>
+  {% for row in s.rows %}
+  <tr>
+    <td class="topic">{{ loop.index }}. {{ row.label }}</td>
+    <td>
+      <span class="{{ 'fallback' if row.status.value in ('not_found', 'not_inserted') }}">{{ s.summary_text(row) }}</span>
+      {% if row.topic == "payment_schedule" and s.schedule %}
+      <ul class="digest">{% for line in s.schedule_lines() %}<li>{{ line }}</li>{% endfor %}</ul>
+      {% endif %}
+    </td>
+    {% set chg = s.changed_text(row) %}
+    <td class="chg {{ 'std' if chg.startswith('Standard') else 'sub-chg' if row.substantive_changes else '' }}">{{ chg }}</td>
+    <td class="src">{{ s.source_text(row) }}</td>
+  </tr>
+  {% endfor %}
+  <tr>
+    <td class="topic">{{ s.rows|length + 1 }}. Other significant changes</td>
+    <td colspan="2">
+      {% if not s.classified %}
+      <span class="fallback">Not available: the deviations were not classified.</span>
+      {% elif s.shown_other() %}
+      <ul class="other">{% for c in s.shown_other() %}
+        <li><span class="id">{{ c.deviation_id }} · {{ c.where }} · {{ c.category }}</span> — {{ s.other_text(c) }}</li>
+      {% endfor %}</ul>
+      {% if s.other_total > s.shown_other()|length %}<span class="id">{{ s.other_total - s.shown_other()|length }} more substantive changes outside these topics are in the full report.</span>{% endif %}
+      {% else %}None outside the topics above.{% endif %}
+    </td>
+    <td class="src">Deviation list</td>
+  </tr>
+</table>
+
+<div class="foot">
+  {{ "{:,}".format(s.totals.total) }} differences from the template; {{ "{:,}".format(s.totals.substantive) }} substantive{% if not s.classified %} or not classified{% endif %}; {{ s.totals.needs_review }} need review.
+  Every change is listed with its text in the full report, {{ s.meta.full_report }}.
+  Summaries are written by software from the sections cited and checked against quotes from the agreement; “See agreement” marks a topic it could not verify.
+  {% if s.meta.draft %}<span class="warn">This is a draft agreement: bracketed values are not final.</span>{% endif %}
+  <br>Run {{ s.meta.run_id }}, {{ s.meta.generated }}.
+</div>
+</body>
+</html>

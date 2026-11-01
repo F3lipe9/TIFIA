@@ -96,3 +96,44 @@ class LabeledDeviation:
     evidence: str = ""          # verbatim quote from the executed text (template text if
                                 # the executed text is empty), checked by the classifier
     review_reason: str = ""     # why needs_review is set
+
+
+# --- executive summary (summary/) ------------------------------------------------------
+
+class ValueStatus(Enum):
+    FOUND = "found"                # summarized, every quote verified
+    DRAFT_BLANK = "draft_blank"    # the value is a bracketed blank in a draft
+    NOT_INSERTED = "not_inserted"  # "[to be inserted]", "[Attached.]"
+    NOT_FOUND = "not_found"        # not in the text sent, a failed check, or no LLM
+
+
+@dataclass
+class TopicRow:
+    topic: str                      # config key, e.g. "interest_rate"
+    label: str                      # "Interest rate"
+    summary: str | None             # plain English; None unless FOUND/DRAFT_BLANK
+    quotes: list[str]               # verified word for word in the agreement
+    sources: list[str]              # e.g. ["§6, PDF p. 41"]
+    status: ValueStatus
+    substantive_changes: int        # deviations mapped to this topic (code, not LLM)
+    change_ids: list[str]           # deviation IDs, most significant first, max 3
+    other_changes: int = 0          # not substantive (incl. fill-ins and renumberings)
+    needs_review: int = 0
+    unclassified: int = 0           # a run without the LLM: changes with no label
+    sections: list[str] = field(default_factory=list)  # "§6": where to look on a fallback
+    problem: str = ""               # why a summary fell back to "See agreement"
+
+
+@dataclass
+class ScheduleDigest:
+    status: ValueStatus
+    pages: list[int]                # PDF pages of the debt service exhibit
+    exhibit: str | None = None      # its letter as printed, e.g. "G" or "F"
+    first_payment: str | None = None
+    final_payment: str | None = None
+    payment_count: int | None = None
+    frequency: str | None = None
+    total_principal: float | None = None
+    largest_annual: tuple[str, float] | None = None  # (year, total paid that year)
+    matches_loan_amount: bool | None = None          # None: no loan amount to check
+    problem: str = ""               # why there is no digest

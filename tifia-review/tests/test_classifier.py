@@ -1,4 +1,6 @@
 import json
+import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -8,7 +10,8 @@ from tifia_review.aligner import Aligner
 from tifia_review.classifier import FILL_IN_CATEGORY, RENUMBERED_CATEGORY, Classifier
 from tifia_review.diff_engine import DiffEngine
 from tifia_review.llm.client import (
-    AnthropicClient, LLMClient, LLMError, Usage, make_client, model_id, parse_json_object,
+    AnthropicClient, GeminiClient, LLMClient, LLMError, Usage, make_client, model_id,
+    parse_json_object,
 )
 from tifia_review.llm.prompts import UNCLEAR
 from tifia_review.models import ChangeType, Deviation, Section, SegmentedDocument
@@ -195,6 +198,69 @@ def test_failures_are_not_cached(tmp_path):
     assert len(client.requests) == 4 and len(cache) == 0
 
 
+# --- parallel requests -----------------------------------------------------------------
+
+def test_parallel_run_matches_a_sequential_one(tmp_path):
+    """Replies finish out of order (later batches first) and one label is retried; the
+    labels, order, stats and cache are as in a one-at-a-time run. The cache's SQLite
+    connection refuses use from another thread, so this also shows that only the
+    calling thread writes to it."""
+    def answer(items):
+        time.sleep(0.05 / int(items[0]["id"][1:]))  # the first batch finishes last
+        return [good(i, evidence="not in the text at all")
+                if i["id"] == "d0005" and "previous_problem" not in i else good(i)
+                for i in items]
+
+    deviations = [dev(n, executed=f"The Borrower shall give notice within {n} days.")
+                  for n in range(1, 13)]
+    runs = []
+    for workers in (1, 4):
+        cache = ResultCache(tmp_path / f"cache{workers}.sqlite")
+        client = FakeClient(answer)
+        c = classifier(client, cache, batch_size=2, max_workers=workers)
+        runs.append((c.classify(deviations), dict(c.stats), len(cache), client.usage))
+        cache.close()
+    (seq, *seq_rest), (par, *par_rest) = runs
+    assert [ld.deviation for ld in par] == deviations
+    assert par == seq and par_rest == seq_rest
+    stats, cached, usage = par_rest
+    assert stats["retried"] == 1 and stats["llm"] == 12
+    assert cached == 12 and usage == Usage(7, 700, 70)  # 6 batches + 1 retry
+
+
+def test_usage_counts_are_safe_across_threads():
+    usage = Usage()
+    one = SimpleNamespace(input_tokens=1, output_tokens=2)
+
+    def add_many():
+        for _ in range(2000):
+            usage.add(one)
+
+    threads = [threading.Thread(target=add_many) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert usage == Usage(16000, 16000, 32000)
+
+
+def test_an_api_error_stops_further_requests():
+    """An error that is not a bad reply (auth, rate limits past the SDK's retries)
+    propagates, and batches not yet started are not sent."""
+    sent = []
+
+    class Failing(FakeClient):
+        def complete_json(self, system, user, schema=None):
+            sent.append(user)
+            time.sleep(0.02)
+            raise RuntimeError("401 invalid x-api-key")
+
+    c = classifier(Failing(lambda items: []), batch_size=1, max_workers=2)
+    with pytest.raises(RuntimeError, match="invalid x-api-key"):
+        c.classify([dev(n) for n in range(1, 21)])
+    assert len(sent) < 20
+
+
 def test_plan_counts_calls_without_calling():
     client = FakeClient(lambda items: pytest.fail("the LLM was called"))
     calls = classifier(client, batch_size=2).plan(
@@ -284,3 +350,62 @@ def test_json_fences_and_provider_lookup():
     assert model_id(config) == "anthropic:claude-sonnet-5-5:low"
     with pytest.raises(ValueError, match="unknown llm.provider"):
         make_client({**config, "provider": "other"})
+
+
+# --- Gemini ----------------------------------------------------------------------------
+
+def _gemini_response(text, finish="STOP", block=None, thought=""):
+    parts = [SimpleNamespace(text=thought, thought=True), SimpleNamespace(text=text, thought=None)]
+    return SimpleNamespace(
+        prompt_feedback=SimpleNamespace(block_reason=block) if block else None,
+        candidates=[] if block else [SimpleNamespace(
+            finish_reason=finish, content=SimpleNamespace(parts=parts))],
+        usage_metadata=SimpleNamespace(prompt_token_count=1500, cached_content_token_count=500,
+                                       candidates_token_count=150, thoughts_token_count=50))
+
+
+class FakeModels:
+    def __init__(self, response):
+        self.response, self.requests = response, []
+
+    def generate_content(self, **kwargs):
+        self.requests.append(kwargs)
+        return self.response
+
+
+def test_gemini_request_uses_schema_thinking_level_and_system_instruction():
+    models = FakeModels(_gemini_response('{"labels": []}', thought="hmm {"))
+    client = GeminiClient("gemini-3.8-flash", max_tokens=8000, effort="medium",
+                          client=SimpleNamespace(models=models))
+    schema = {"type": "object"}
+    assert client.complete_json("system text", "user text", schema) == {"labels": []}
+    (request,) = models.requests
+    assert request["model"] == "gemini-3.8-flash" and request["contents"] == "user text"
+    assert request["config"] == {
+        "system_instruction": "system text", "max_output_tokens": 8000,
+        "response_mime_type": "application/json", "response_json_schema": schema,
+        "thinking_config": {"thinking_level": "MEDIUM"}}
+    assert client.usage == Usage(1, 1000, 200, 0, 500)  # cached tokens split out of prompt
+    assert client.model_id == "gemini:gemini-3.8-flash:medium"
+
+
+@pytest.mark.parametrize("response, message", [
+    (_gemini_response("", block="PROHIBITED_CONTENT"), r"refused \(PROHIBITED_CONTENT\)"),
+    (_gemini_response("", finish="SAFETY"), r"refused \(safety\)"),
+    (_gemini_response('{"labels": [', finish="MAX_TOKENS"), "cut off"),
+    (_gemini_response("not json"), "not valid JSON"),
+])
+def test_gemini_unusable_replies_raise(response, message):
+    client = GeminiClient("m", client=SimpleNamespace(models=FakeModels(response)))
+    with pytest.raises(LLMError, match=message):
+        client.complete_json("s", "u")
+    assert client.usage.calls == 1
+
+
+def test_gemini_from_config_needs_a_key(monkeypatch):
+    for var in ("LLM_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
+    config = {"provider": "gemini", "model": "gemini-3.8-flash", "effort": "low"}
+    assert model_id(config) == "gemini:gemini-3.8-flash:low"
+    with pytest.raises(RuntimeError, match="no Gemini API key"):
+        make_client(config)

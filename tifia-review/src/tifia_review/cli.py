@@ -45,8 +45,10 @@ def source(row: dict, root: Path) -> Source:
     m = _FILE.match(row["notes"])
     if not m:
         raise SystemExit(f"manifest row {row['doc_id']} names no PDF (notes start 'File: ...')")
+    full = (row.get("full_path") or "").strip()
     return Source(row["doc_id"], row["type"], root / m.group(1), row.get("title", ""),
-                  row.get("signing_date", ""), row.get("template_version", ""))
+                  row.get("signing_date", ""), row.get("template_version", ""),
+                  root / full if full else None, (row.get("exhibit_g_pages") or "").strip())
 
 
 def main(argv: list[str] | None = None, root: Path | None = None) -> int:
@@ -95,6 +97,13 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
                 "cache_read_tokens": result.usage.cache_read_input_tokens,
                 "cost_usd": round(cost, 4)})
             line += f"; LLM ${cost:.2f}, ${total:.2f} of ${llm['budget_usd']} so far"
+        if result.summary_pdf is not None:
+            shown = (result.summary_pdf.relative_to(root)
+                     if result.summary_pdf.is_relative_to(root) else result.summary_pdf)
+            note = f" ({result.summary_note})" if result.summary_note else ""
+            line += "\n  summary -> " + str(shown) + note
+        elif result.summary_note:
+            line += "\n  no summary: " + result.summary_note
         print(line)
     return 0
 

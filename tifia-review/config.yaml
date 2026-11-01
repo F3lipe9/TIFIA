@@ -28,6 +28,8 @@ llm:
   batch_size: 15               # deviations per call (10-20)
   max_batch_chars: 40000       # ... and about this much deviation JSON at most per call
   max_retries: 1               # a label that fails a check is sent once more
+  max_workers: 3               # requests in flight at once; raise to 4-8 only if no 429s
+  api_retries: 6               # SDK retries per request on 429/5xx, with backoff
   price_per_mtok:              # USD for the model above, for the cost log
     input: 2.00
     output: 10.00
@@ -65,6 +67,66 @@ substantive: >-
   obligation, right, condition, deadline, amount, rate, threshold or remedy, or the scope
   of a defined term. Changes that leave the meaning the same are not substantive:
   wording, style, punctuation, cross-references and numbering.
+
+# Two-page executive summary (Summary_Report.md v2), made with every report. Sections are
+# the 2023 project-revenue template's; the agreement's matching sections are found through
+# the alignment. "recitals" = the preamble; "1:<term>" = that definition. A deviation
+# counts for a topic if its template section (or a parent) is listed; a definition only
+# through "1:<term>" or state_law_definitions. Changing a topic's ask or sections reruns
+# that row's LLM call; the rest stay cached.
+summary:
+  enabled: true
+  max_pages: 2
+  max_excerpt_chars: 60000     # per topic, sent to the LLM
+  loan_amount_section: "3"     # for the Exhibit G principal cross-check
+  # ranking of "other significant changes"; set at the taxonomy meeting (default: taxonomy order)
+  category_priority: [Payment terms, Events of default, Covenants, Conditions precedent,
+                      Definitions, Other]
+  other_significant_changes: {top_n: 3}
+  topics:
+    project:
+      label: The project
+      sections: [recitals, "1:Project"]
+      ask: What is being built or financed, in one or two lines.
+    borrowing_authority:
+      label: Borrowing authority
+      sections: ["12", "13"]       # sent to the LLM
+      # counted as changes to this topic: Organization; Power and Authority, Officers'
+      # Authorization, and the condition that the authorizing resolutions be delivered
+      count_sections: ["13(a)", "13(b)", "12(a)(xix)"]
+      state_law_definitions: true  # the borrower's enabling act, whatever it is called
+      ask: >-
+        (a) The state law that lets the borrower borrow and pledge its revenues, and (b) the
+        resolution or other action that authorizes this loan. Say if either is not stated.
+    loan_amount:
+      label: Loan amount
+      sections: [recitals, "3"]
+      ask: The maximum principal amount of the TIFIA loan, and whether capitalized interest is excluded.
+    interest_rate:
+      label: Interest rate
+      sections: ["6"]
+      ask: The interest rate and how it is set; the default rate if stated.
+    payment_schedule:
+      label: Payment schedule
+      sections: ["5", "7", "9", "10", "1:Final Maturity Date",
+                 "1:Debt Service Payment Commencement Date", "1:Semi-Annual Payment Date"]
+      ask: How often payments are due, when repayment of principal starts, and the final maturity date.
+    default_remedies:
+      label: Events of default and remedies
+      sections: ["19"]
+      ask: The main events of default (two or three, briefly) and what the lender can do.
+    accounting_audit:
+      label: Accounting and audit
+      sections: ["20"]
+      ask: What records, audits and inspection rights the agreement requires.
+    oversight:
+      label: Project oversight and monitoring
+      sections: ["22"]
+      ask: Who oversees the project and what the borrower must report.
+    notices_termination:
+      label: Notices and termination
+      sections: ["36", "38"]
+      ask: How formal notices are given, and when the agreement ends.
 
 evaluation:
   match_text_overlap: 0.50     # min text overlap to match predicted vs gold

@@ -16,12 +16,22 @@ STAGES = ["load_template", "load_executed", "segment_template", "segment_execute
 
 
 class QuotingClient(LLMClient):
-    """Labels every deviation Covenants, quoting the start of the text it must quote."""
+    """Labels every deviation Covenants, quoting the start of the text it must quote; for
+    the summary, quotes the start of the first excerpt, and writes a two-sentence bottom
+    line."""
     model_id = "fake"
 
     def complete_json(self, system, user, schema=None):
-        items = json.loads(user[user.index("\n["):])
         self.usage.add(SimpleNamespace(input_tokens=500, output_tokens=50))
+        fields = (schema or {}).get("properties", {})
+        if "status" in fields:  # a summary topic
+            excerpt = user[user.index("<excerpt"):]
+            excerpt = excerpt[excerpt.index(">") + 1:]
+            return {"status": "found", "summary": "What the agreement says.",
+                    "quotes": [" ".join(excerpt.split()[:6])]}
+        if "topics_mentioned" in fields:  # the bottom line
+            return {"text": "Close to the template. Few changes.", "topics_mentioned": []}
+        items = json.loads(user[user.index("\n["):])
         return {"labels": [{"id": i["id"], "category": "Covenants", "substantive": True,
                             "explanation": "Changed.",
                             "evidence": " ".join((i.get("agreement_text")
@@ -52,7 +62,11 @@ def test_pipeline_saves_every_stage_and_the_report(tmp_path):
     assert result.pdf == (tmp_path / "outputs" / "reports"
                           / "fx_03_modified__vs__tla_template_2023_public_project_revenue.pdf")
     assert result.counts["total"] == 4 and result.counts["fill_in"] == 2
-    assert result.usage.calls == 1 and result.stats["llm"] == 2
+    topics = len(config(tmp_path)["summary"]["topics"])
+    # 1 classifier batch, a request per summary topic, and the bottom line
+    assert result.usage.calls == 1 + topics + 1 and result.stats["llm"] == 2
+    assert result.summary_pdf == tmp_path / "outputs" / "reports" / "fx_03_modified_summary.pdf"
+    assert result.summary_pdf.exists() and (result.run_dir / "summary.json").exists()
     html = (result.run_dir / "report.html").read_text(encoding="utf-8")
     assert "Fixture 3" in html and "<ins>ninety (90)</ins>" in html
 

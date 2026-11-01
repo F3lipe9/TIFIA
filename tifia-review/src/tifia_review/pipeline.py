@@ -1,13 +1,17 @@
-"""Pipeline: load -> segment -> align -> diff -> classify -> report, for one executed
-agreement against its template.
+"""Pipeline: load -> segment -> align -> diff -> classify -> report -> summary, for one
+executed agreement against its template.
 
 Every stage's output is saved to outputs/<run_id>/<executed doc_id>/<stage>.json
 (store.RunStore), so any stage can be rerun or debugged from the one before; the report
 goes next to them as report.html and report.pdf, and the PDF is copied to
-outputs/reports/<executed>__vs__<template>.pdf. A template used for several agreements is
-loaded and segmented once per run.
+outputs/reports/<executed>__vs__<template>.pdf. The two-page executive summary
+(summary/, config summary) goes next to them as summary.html/.pdf/.json, copied to
+outputs/reports/<executed>_summary.pdf; it is skipped for a held-out agreement
+(evaluation.holdout) until its score is recorded. A template used for several agreements
+is loaded and segmented once per run.
 """
 
+import logging
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,6 +25,10 @@ from tifia_review.models import Document, SegmentedDocument
 from tifia_review.report.builder import build_report_data, write_report
 from tifia_review.segmenter import Segmenter
 from tifia_review.store import ResultCache, RunStore, new_run_id
+from tifia_review.summary.builder import SummaryTooLong
+from tifia_review.summary.summarize import Summarizer
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -32,6 +40,8 @@ class Source:
     title: str = ""
     signing_date: str = ""
     template_version: str = ""
+    full_path: Path | None = None  # the PDF with its exhibits, if path is the body only
+    exhibit_pages: str = ""        # override for the debt service exhibit, e.g. "120-122"
 
 
 @dataclass
@@ -44,6 +54,8 @@ class Result:
     counts: dict
     usage: Usage | None = None  # LLM tokens of this agreement, None without the LLM
     stats: dict = field(default_factory=dict)
+    summary_pdf: Path | None = None  # outputs/reports/<executed>_summary.pdf
+    summary_note: str = ""           # why there is no summary, or how it was shortened
 
 
 class Pipeline:
@@ -62,10 +74,15 @@ class Pipeline:
                                model_name=aligner["embedding_model"])
         self.engine = DiffEngine()
         self.classifier: Classifier | None = None
+        cache = ResultCache(self.root / config["paths"]["cache_db"])
         if classify:
             self.classifier = Classifier.from_config(
-                client or make_client(config["llm"]), config,
-                ResultCache(self.root / config["paths"]["cache_db"]))
+                client or make_client(config["llm"]), config, cache)
+        summary = config.get("summary") or {}
+        self.summarizer = (Summarizer(config, self.classifier.client if self.classifier
+                                      else None, cache)
+                           if summary.get("enabled", True) and summary.get("topics") else None)
+        self.holdout = set((config.get("evaluation") or {}).get("holdout") or [])
         self._docs: dict[str, tuple[Document, SegmentedDocument]] = {}
 
     def run(self, executed: Source, template: Source) -> Result:
@@ -80,13 +97,12 @@ class Pipeline:
         deviations = self.engine.diff(t_seg, e_seg, alignments)
         store.save("diff", deviations)
 
-        usage, stats = None, {}
+        usage, stats, before = None, {}, None
         if self.classifier is not None:
             client = self.classifier.client
             before = Usage(**vars(client.usage))
             self.classifier.stats.clear()
             labeled = self.classifier.classify(deviations, t_seg, e_seg)
-            usage = Usage(**{k: v - getattr(before, k) for k, v in vars(client.usage).items()})
             stats = dict(self.classifier.stats)
         else:
             labeled = unclassified(deviations)
@@ -99,8 +115,36 @@ class Pipeline:
         reports.mkdir(parents=True, exist_ok=True)
         copy = reports / f"{executed.doc_id}__vs__{template.doc_id}.pdf"
         shutil.copyfile(pdf, copy)
+        summary_pdf, note = self._summary(executed, template, labeled, data.counts, t_seg,
+                                          e_seg, alignments, e_doc, store, copy.name)
+        if before is not None:  # the classifier's and the summary's LLM calls
+            client = self.classifier.client
+            usage = Usage(**{k: v - getattr(before, k) for k, v in vars(client.usage).items()})
         return Result(executed.doc_id, template.doc_id, copy, store.dir, renderer, data.counts,
-                      usage, stats)
+                      usage, stats, summary_pdf, note)
+
+    def _summary(self, executed: Source, template: Source, labeled, counts, t_seg, e_seg,
+                 alignments, e_doc, store: RunStore, full_report: str
+                 ) -> tuple[Path | None, str]:
+        if self.summarizer is None:
+            return None, "summary turned off (config summary)"
+        if executed.doc_id in self.holdout:
+            return None, "held out: no summary until its score is recorded"
+        meta = {"agreement_id": executed.doc_id,
+                "agreement_title": executed.title or executed.doc_id,
+                "template_title": template.title or template.doc_id,
+                "signing_date": executed.signing_date, "run_id": self.run_id,
+                "full_report": full_report}
+        data = self.summarizer.build(labeled, counts, t_seg, e_seg, alignments, e_doc, meta,
+                                     executed.full_path or executed.path, executed.exhibit_pages)
+        try:
+            _, pdf, _, shown = self.summarizer.write(data, store.dir)
+        except SummaryTooLong as e:
+            log.error("%s", e)
+            return None, str(e)
+        copy = self.outputs / "reports" / f"{executed.doc_id}_summary.pdf"
+        shutil.copyfile(pdf, copy)
+        return copy, "shortened to fit" if shown.level else ""
 
     def _load(self, source: Source) -> tuple[Document, SegmentedDocument]:
         if source.doc_id not in self._docs:
