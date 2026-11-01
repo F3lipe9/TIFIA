@@ -18,7 +18,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-gemini = ["google-genai>=2.0"]  # response_json_schema, thinking_level
 anthropic = ["anthropic>=0.97"]  # structured outputs (output_config)
 openai = ["openai>=1.50"]
 dev = ["pytest>=8.0", "ruff>=0.6"]

@@ -137,7 +137,7 @@ Everything goes to `outputs/` (not committed; safe to delete, it is all regenera
 | `paths` | Where documents, the manifest, outputs and the cache are |
 | `loader`, `aligner` | Low-text page detection; the embedding model and match threshold |
 | `pipeline.default_template` | Template for a manifest row with no `template` |
-| `llm` | Provider (`anthropic`; `gemini` also supported), model, effort, batch size, `max_workers` (parallel calls; raise slowly if there are no rate-limit errors), `api_retries`, prices for the cost log, budget |
+| `llm` | Provider (`anthropic`), model, effort, batch size, `max_workers` (parallel calls; raise slowly if there are no rate-limit errors), `api_retries`, prices for the cost log, budget |
 | `taxonomy`, `substantive` | The categories and the definition of a substantive change. **Drafts** until the advisor confirms them (`docs/taxonomy-draft.md`) |
 | `summary` | Topics (label, sections sent to the LLM, sections counted, the question asked), `category_priority` for ranking "other significant changes", page limit |
 | `evaluation` | Match rules, target recall and precision, who agreed the threshold, the held-out agreement |
@@ -215,7 +215,7 @@ src/tifia_review/
   aligner.py         template sections <-> agreement sections
   diff_engine.py     paired sections -> deviations
   classifier.py      deviations -> labels (LLM), with checks and cache
-  llm/               client.py (Anthropic, Gemini; usage and cost), prompts.py
+  llm/               client.py (Anthropic; usage and cost), prompts.py
   report/            builder.py + template.html: the deviation report, PDF rendering
   summary/           the executive summary: mapping, topics, exhibits, schedule,
                      bottom_line, builder, summarize, summary.html

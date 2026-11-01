@@ -10,7 +10,7 @@ from tifia_review.aligner import Aligner
 from tifia_review.classifier import FILL_IN_CATEGORY, RENUMBERED_CATEGORY, Classifier
 from tifia_review.diff_engine import DiffEngine
 from tifia_review.llm.client import (
-    AnthropicClient, GeminiClient, LLMClient, LLMError, Usage, make_client, model_id,
+    AnthropicClient, LLMClient, LLMError, Usage, make_client, model_id,
     parse_json_object,
 )
 from tifia_review.llm.prompts import UNCLEAR
@@ -351,61 +351,3 @@ def test_json_fences_and_provider_lookup():
     with pytest.raises(ValueError, match="unknown llm.provider"):
         make_client({**config, "provider": "other"})
 
-
-# --- Gemini ----------------------------------------------------------------------------
-
-def _gemini_response(text, finish="STOP", block=None, thought=""):
-    parts = [SimpleNamespace(text=thought, thought=True), SimpleNamespace(text=text, thought=None)]
-    return SimpleNamespace(
-        prompt_feedback=SimpleNamespace(block_reason=block) if block else None,
-        candidates=[] if block else [SimpleNamespace(
-            finish_reason=finish, content=SimpleNamespace(parts=parts))],
-        usage_metadata=SimpleNamespace(prompt_token_count=1500, cached_content_token_count=500,
-                                       candidates_token_count=150, thoughts_token_count=50))
-
-
-class FakeModels:
-    def __init__(self, response):
-        self.response, self.requests = response, []
-
-    def generate_content(self, **kwargs):
-        self.requests.append(kwargs)
-        return self.response
-
-
-def test_gemini_request_uses_schema_thinking_level_and_system_instruction():
-    models = FakeModels(_gemini_response('{"labels": []}', thought="hmm {"))
-    client = GeminiClient("gemini-3.8-flash", max_tokens=8000, effort="medium",
-                          client=SimpleNamespace(models=models))
-    schema = {"type": "object"}
-    assert client.complete_json("system text", "user text", schema) == {"labels": []}
-    (request,) = models.requests
-    assert request["model"] == "gemini-3.8-flash" and request["contents"] == "user text"
-    assert request["config"] == {
-        "system_instruction": "system text", "max_output_tokens": 8000,
-        "response_mime_type": "application/json", "response_json_schema": schema,
-        "thinking_config": {"thinking_level": "MEDIUM"}}
-    assert client.usage == Usage(1, 1000, 200, 0, 500)  # cached tokens split out of prompt
-    assert client.model_id == "gemini:gemini-3.8-flash:medium"
-
-
-@pytest.mark.parametrize("response, message", [
-    (_gemini_response("", block="PROHIBITED_CONTENT"), r"refused \(PROHIBITED_CONTENT\)"),
-    (_gemini_response("", finish="SAFETY"), r"refused \(safety\)"),
-    (_gemini_response('{"labels": [', finish="MAX_TOKENS"), "cut off"),
-    (_gemini_response("not json"), "not valid JSON"),
-])
-def test_gemini_unusable_replies_raise(response, message):
-    client = GeminiClient("m", client=SimpleNamespace(models=FakeModels(response)))
-    with pytest.raises(LLMError, match=message):
-        client.complete_json("s", "u")
-    assert client.usage.calls == 1
-
-
-def test_gemini_from_config_needs_a_key(monkeypatch):
-    for var in ("LLM_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"):
-        monkeypatch.delenv(var, raising=False)
-    config = {"provider": "gemini", "model": "gemini-3.8-flash", "effort": "low"}
-    assert model_id(config) == "gemini:gemini-3.8-flash:low"
-    with pytest.raises(RuntimeError, match="no Gemini API key"):
-        make_client(config)

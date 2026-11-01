@@ -27,8 +27,8 @@ so start that today, in parallel with everything else.
 ## Since the last update
 
 - **LLM: back on Claude.** The project briefly switched to Gemini and was switched back:
-  `config.yaml` uses `claude-sonnet-5-5` at medium effort. The Gemini client is still in
-  the code as an unused option (`llm.provider: gemini`).
+  `config.yaml` uses `claude-sonnet-5-5` at medium effort. The Gemini client has since
+  been removed from the code; Anthropic is the only provider.
 - **Faster classification.** Calls now go out 3 at a time (`llm.max_workers`), with
   retries on rate limits (`llm.api_retries`). A full agreement took about 2 minutes and
   $1.13 (HRTAC: 609 deviations, 37 calls), much less than the earlier $3 estimate. If

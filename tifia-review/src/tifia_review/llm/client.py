@@ -14,7 +14,6 @@ import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, fields
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -167,95 +166,7 @@ class AnthropicClient(LLMClient):
         return client
 
 
-class GeminiClient(LLMClient):
-    """Gemini through the Google Gen AI SDK with a Google AI Studio API key, with
-    structured outputs for the schema. Caching is Gemini's implicit caching (automatic,
-    no write charge); effort sets thinking_level."""
-
-    _REFUSED = {"SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "LANGUAGE"}
-
-    def __init__(self, model: str, max_tokens: int = 16000, effort: str | None = None,
-                 api_key: str | None = None, client: Any = None, api_retries: int = 6):
-        super().__init__()
-        if client is None:
-            from google import genai
-            from google.genai import types
-            # the SDK does not retry by default: retry rate limits (429) and overload
-            # (500/502/503/504) with backoff, about 2 minutes in all; and it has no
-            # timeout by default, so a stalled request would hang the run: 5 minutes each
-            http = types.HttpOptions(timeout=300_000, retry_options=types.HttpRetryOptions(
-                attempts=api_retries + 1, initial_delay=4.0, max_delay=60.0, exp_base=2.0,
-                http_status_codes=[408, 429, 500, 502, 503, 504]))
-            # without a key the SDK looks up GEMINI_API_KEY or GOOGLE_API_KEY itself
-            client = genai.Client(api_key=api_key, http_options=http)
-        self._client = client
-        self.model, self.max_tokens, self.effort = model, max_tokens, effort
-        self.model_id = self.model_id_from_config({"model": model, "effort": effort})
-
-    def complete_json(self, system: str, user: str, schema: dict | None = None) -> dict:
-        config: dict[str, Any] = {
-            "system_instruction": system,
-            "max_output_tokens": self.max_tokens,
-            "response_mime_type": "application/json",
-        }
-        if schema is not None:
-            config["response_json_schema"] = schema
-        if self.effort:
-            config["thinking_config"] = {"thinking_level": self.effort.upper()}
-        response = self._client.models.generate_content(
-            model=self.model, contents=user, config=config)
-        meta = response.usage_metadata
-        prompt = getattr(meta, "prompt_token_count", 0) or 0
-        cached = getattr(meta, "cached_content_token_count", 0) or 0
-        output = ((getattr(meta, "candidates_token_count", 0) or 0)
-                  + (getattr(meta, "thoughts_token_count", 0) or 0))
-        # prompt_token_count includes the cached tokens; Usage counts them separately
-        self.usage.add(SimpleNamespace(input_tokens=prompt - cached, output_tokens=output,
-                                       cache_read_input_tokens=cached))
-        log.debug("%s: %s in (%s cached), %s out", self.model, prompt, cached, output)
-        feedback = getattr(response, "prompt_feedback", None)
-        if feedback is not None and getattr(feedback, "block_reason", None):
-            raise LLMError(f"request refused ({_name(feedback.block_reason)})")
-        if not response.candidates:
-            raise LLMError("reply has no candidates")
-        candidate = response.candidates[0]
-        reason = _name(getattr(candidate, "finish_reason", None))
-        if reason in self._REFUSED:
-            raise LLMError(f"request refused ({reason.lower()})")
-        if reason == "MAX_TOKENS":
-            raise LLMError(f"reply cut off at max_tokens={self.max_tokens}")
-        parts = getattr(candidate.content, "parts", None) or []
-        text = "".join(p.text for p in parts
-                       if getattr(p, "text", None) and not getattr(p, "thought", False))
-        return parse_json_object(text)
-
-    @classmethod
-    def model_id_from_config(cls, config: dict) -> str:
-        return f"gemini:{config['model']}:{config.get('effort') or 'default'}"
-
-    @classmethod
-    def from_config(cls, config: dict) -> "GeminiClient":
-        """Raises RuntimeError if no API key is found, before any request."""
-        key_env = config.get("api_key_env", "LLM_API_KEY")
-        key = (os.environ.get(key_env) or os.environ.get("GEMINI_API_KEY")
-               or os.environ.get("GOOGLE_API_KEY"))
-        if not key:
-            raise RuntimeError(f"no Gemini API key: set {key_env} in .env (see .env.example) "
-                               "or GEMINI_API_KEY in the environment; create one at "
-                               "https://aistudio.google.com/apikey")
-        return cls(config["model"], max_tokens=config.get("max_tokens", 16000),
-                   effort=config.get("effort"), api_key=key,
-                   api_retries=config.get("api_retries", 6))
-
-
-def _name(value: Any) -> str:
-    """An SDK enum or plain string as its upper-case name ("" for None)."""
-    if value is None:
-        return ""
-    return str(getattr(value, "name", value)).upper()
-
-
-PROVIDERS: dict[str, type[LLMClient]] = {"anthropic": AnthropicClient, "gemini": GeminiClient}
+PROVIDERS: dict[str, type[LLMClient]] = {"anthropic": AnthropicClient}
 
 
 def _provider(config: dict) -> type[LLMClient]:
