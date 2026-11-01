@@ -1,0 +1,242 @@
+{
+  "fx_01_added": {
+    "filled_fields": {
+      "borrower": "Metro Regional Transit Authority",
+      "project": "Northgate Corridor Project",
+      "amount": "$245,000,000",
+      "date": "March 15, 2024",
+      "rate": "4.50"
+    },
+    "planted": [
+      {
+        "change_type": "added",
+        "template_section_id": null,
+        "executed_section_id": "4(f)",
+        "template_page": null,
+        "executed_page": 37,
+        "template_text": "",
+        "executed_text": "(f)  The Borrower shall pay to the TIFIA Lender a fee equal to one-quarter of one percent (0.25%) of the amount of each disbursement of proceeds of the TIFIA Loan, payable on the date of such disbursement. Such fee shall be in addition to any other fees and expenses payable pursuant to Section 28 (Fees and Expenses).",
+        "substantive": true
+      }
+    ],
+    "fill_ins": [
+      {
+        "change_type": "fill_in",
+        "template_section_id": "preamble",
+        "executed_section_id": "preamble",
+        "template_page": 4,
+        "executed_page": 4,
+        "template_text": "by and between [BORROWER], a [_________] created",
+        "executed_text": "by and between Metro Regional Transit Authority, a [_________] created",
+        "substantive": false
+      },
+      {
+        "change_type": "fill_in",
+        "template_section_id": "6",
+        "executed_section_id": "6",
+        "template_page": 37,
+        "executed_page": 38,
+        "template_text": "shall be [___] percent ([__]%) per annum",
+        "executed_text": "shall be 4.50 percent (4.50%) per annum",
+        "substantive": false
+      }
+    ]
+  },
+  "fx_02_removed": {
+    "filled_fields": {
+      "borrower": "Lakeshore Expressway Authority",
+      "project": "Harbor Bridge Replacement Project",
+      "amount": "$180,500,000",
+      "date": "June 28, 2024",
+      "rate": "4.25"
+    },
+    "planted": [
+      {
+        "change_type": "removed",
+        "template_section_id": "4(e)",
+        "executed_section_id": null,
+        "template_page": 37,
+        "executed_page": null,
+        "template_text": "Notwithstanding anything to the contrary set forth in this Agreement (including this Section 4, Section 12 (Conditions Precedent) or Exhibit D (Requisition Procedures)), in no event shall the TIFIA Lender have any obligation to make any disbursement of proceeds of the TIFIA Loan to the Borrower if the TIFIA Lender's ability to make such disbursement is impaired as a result of a partial or total shutdown of the operations of any federal department or agency [...] due to a lapse in appropriations by Congress.",
+        "executed_text": "",
+        "substantive": true
+      }
+    ],
+    "fill_ins": [
+      {
+        "change_type": "fill_in",
+        "template_section_id": "preamble",
+        "executed_section_id": "preamble",
+        "template_page": 4,
+        "executed_page": 4,
+        "template_text": "by and between [BORROWER], a [_________] created",
+        "executed_text": "by and between Lakeshore Expressway Authority, a [_________] created",
+        "substantive": false
+      },
+      {
+        "change_type": "fill_in",
+        "template_section_id": "6",
+        "executed_section_id": "6",
+        "template_page": 37,
+        "executed_page": 37,
+        "template_text": "shall be [___] percent ([__]%) per annum",
+        "executed_text": "shall be 4.25 percent (4.25%) per annum",
+        "substantive": false
+      }
+    ]
+  },
+  "fx_03_modified": {
+    "filled_fields": {
+      "borrower": "Cascade County Transportation District",
+      "project": "Route 9 Managed Lanes Project",
+      "amount": "$312,000,000",
+      "date": "September 10, 2024",
+      "rate": "4.75"
+    },
+    "planted": [
+      {
+        "change_type": "modified",
+        "template_section_id": "1",
+        "executed_section_id": "1",
+        "affects_defined_term": "Bankruptcy Related Event",
+        "template_page": 8,
+        "executed_page": 8,
+        "template_text": "shall continue undismissed for sixty (60) days",
+        "executed_text": "shall continue undismissed for ninety (90) days",
+        "detail": "definition of Bankruptcy Related Event, clause (a)",
+        "substantive": true
+      },
+      {
+        "change_type": "modified",
+        "template_section_id": "16(b)",
+        "executed_section_id": "16(b)",
+        "template_page": 73,
+        "executed_page": 73,
+        "template_text": "at least thirty (30) days prior to the effective date thereof",
+        "executed_text": "at least ten (10) days prior to the effective date thereof",
+        "substantive": true
+      }
+    ],
+    "fill_ins": [
+      {
+        "change_type": "fill_in",
+        "template_section_id": "preamble",
+        "executed_section_id": "preamble",
+        "template_page": 4,
+        "executed_page": 4,
+        "template_text": "by and between [BORROWER], a [_________] created",
+        "executed_text": "by and between Cascade County Transportation District, a [_________] created",
+        "substantive": false
+      },
+      {
+        "change_type": "fill_in",
+        "template_section_id": "6",
+        "executed_section_id": "6",
+        "template_page": 37,
+        "executed_page": 37,
+        "template_text": "shall be [___] percent ([__]%) per annum",
+        "executed_text": "shall be 4.75 percent (4.75%) per annum",
+        "substantive": false
+      }
+    ]
+  },
+  "fx_04_renumbered": {
+    "filled_fields": {
+      "borrower": "Red Rock Regional Rail Commission",
+      "project": "Eastside Light Rail Extension",
+      "amount": "$520,000,000",
+      "date": "November 21, 2024",
+      "rate": "4.60"
+    },
+    "planted": [
+      {
+        "change_type": "renumbered",
+        "template_section_id": "5",
+        "executed_section_id": "6",
+        "heading": "Term",
+        "template_page": 37,
+        "executed_page": 37,
+        "template_text": "Section 5. Term.",
+        "executed_text": "Section 6. Term.",
+        "substantive": false
+      },
+      {
+        "change_type": "renumbered",
+        "template_section_id": "6",
+        "executed_section_id": "5",
+        "heading": "Interest Rate",
+        "template_page": 37,
+        "executed_page": 37,
+        "template_text": "Section 6. Interest Rate.",
+        "executed_text": "Section 5. Interest Rate.",
+        "substantive": false
+      }
+    ],
+    "fill_ins": [
+      {
+        "change_type": "fill_in",
+        "template_section_id": "preamble",
+        "executed_section_id": "preamble",
+        "template_page": 4,
+        "executed_page": 4,
+        "template_text": "by and between [BORROWER], a [_________] created",
+        "executed_text": "by and between Red Rock Regional Rail Commission, a [_________] created",
+        "substantive": false
+      },
+      {
+        "change_type": "fill_in",
+        "template_section_id": "6",
+        "executed_section_id": "5",
+        "template_page": 37,
+        "executed_page": 37,
+        "template_text": "shall be [___] percent ([__]%) per annum",
+        "executed_text": "shall be 4.60 percent (4.60%) per annum",
+        "substantive": false
+      }
+    ]
+  },
+  "fx_05_definition": {
+    "filled_fields": {
+      "borrower": "Gulf Coast Port Authority",
+      "project": "Terminal Access Connector Project",
+      "amount": "$96,750,000",
+      "date": "January 30, 2025",
+      "rate": "4.35"
+    },
+    "planted": [
+      {
+        "change_type": "modified",
+        "template_section_id": "1",
+        "executed_section_id": "1",
+        "affects_defined_term": "Acceptable Credit Rating",
+        "template_page": 5,
+        "executed_page": 5,
+        "template_text": "‘A+’, ‘A1’ ... ‘A’, ‘A2’",
+        "executed_text": "‘A-’, ‘A3’ ... ‘BBB+’, ‘Baa1’",
+        "substantive": true
+      }
+    ],
+    "fill_ins": [
+      {
+        "change_type": "fill_in",
+        "template_section_id": "preamble",
+        "executed_section_id": "preamble",
+        "template_page": 4,
+        "executed_page": 4,
+        "template_text": "by and between [BORROWER], a [_________] created",
+        "executed_text": "by and between Gulf Coast Port Authority, a [_________] created",
+        "substantive": false
+      },
+      {
+        "change_type": "fill_in",
+        "template_section_id": "6",
+        "executed_section_id": "6",
+        "template_page": 37,
+        "executed_page": 37,
+        "template_text": "shall be [___] percent ([__]%) per annum",
+        "executed_text": "shall be 4.35 percent (4.35%) per annum",
+        "substantive": false
+      }
+    ]
+  }
+}

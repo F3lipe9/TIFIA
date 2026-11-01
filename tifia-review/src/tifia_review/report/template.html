@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Deviation report: {{ r.meta.agreement_id }}</title>
+<style>
+@page {
+  size: Letter;
+  margin: 0.75in 0.7in 0.8in;
+  @bottom-left { content: "Prototype — for professional review only"; font: 7.5pt "Segoe UI", Arial, sans-serif; color: #9b1c1c; }
+  @bottom-right { content: "Page " counter(page) " of " counter(pages); font: 7.5pt "Segoe UI", Arial, sans-serif; color: #555; }
+}
+@page :first { @bottom-left { content: none; } @bottom-right { content: none; } }
+html { font-size: 9.5pt; }
+body { margin: 0; font-family: Georgia, "Times New Roman", serif; line-height: 1.38; color: #1a1a1a; }
+h1, h2, h3, .sans, .badge, .cite, .reason, .banner, .more, th, table.counts, table.meta, table.list { font-family: "Segoe UI", Arial, Helvetica, sans-serif; }
+h2 { font-size: 15pt; margin: 0 0 4pt; color: #1f3a5f; border-bottom: 1.5pt solid #1f3a5f; padding-bottom: 3pt; }
+h3 { font-size: 11pt; margin: 14pt 0 6pt; color: #1f3a5f; }
+p { margin: 4pt 0 8pt; }
+.part { break-before: page; }
+.intro { color: #444; }
+a { color: #1f3a5f; text-decoration: none; }
+
+.cover { padding-top: 1.5in; }
+.cover h1 { font-size: 26pt; color: #1f3a5f; margin: 0 0 8pt; }
+.cover .sub { font-size: 13pt; color: #333; margin-bottom: 20pt; }
+.warning { border: 2pt solid #9b1c1c; color: #9b1c1c; padding: 10pt 14pt; font: 600 12pt "Segoe UI", Arial, sans-serif; margin: 0 0 26pt; }
+.warning span { display: block; font-weight: 400; font-size: 9pt; margin-top: 3pt; }
+table.meta { border-collapse: collapse; font-size: 9.5pt; }
+table.meta th { text-align: left; color: #555; font-weight: 600; padding: 3pt 14pt 3pt 0; vertical-align: top; white-space: nowrap; }
+table.meta td { padding: 3pt 0; vertical-align: top; }
+
+.card { break-inside: avoid; border: 0.75pt solid #c9d1db; border-left: 3.5pt solid #1f3a5f; padding: 6pt 8pt 7pt; margin: 0 0 9pt; }
+.card.review { border-left-color: #b45309; }
+.card .id { color: #666; font: 8pt "Segoe UI", Arial, sans-serif; margin-right: 5pt; }
+.card .title { font: 600 10pt "Segoe UI", Arial, sans-serif; }
+.badge { display: inline-block; font-size: 7.5pt; padding: 0.5pt 5pt; border-radius: 6pt; margin-left: 4pt; }
+.badge.sub { background: #fde2e2; color: #8a1c1c; }
+.badge.non { background: #e8edf3; color: #3d4b5c; }
+.badge.rev { background: #fde9c8; color: #8a4b05; }
+.badge.cat { background: #eef0f2; color: #333; }
+.cite { font-size: 8pt; color: #444; margin: 2pt 0 4pt; }
+.expl { margin: 3pt 0; }
+.evidence { margin: 3pt 0; font-size: 8.5pt; color: #333; }
+.reason { margin: 3pt 0; font-size: 8.5pt; color: #8a4b05; }
+table.sbs { width: 100%; border-collapse: collapse; table-layout: fixed; margin-top: 4pt; font-size: 8.5pt; }
+table.sbs th { background: #f2f4f7; font-size: 7.5pt; text-align: left; padding: 2pt 4pt; color: #444; border: 0.5pt solid #d5dbe3; }
+table.sbs td { vertical-align: top; padding: 3pt 4pt; border: 0.5pt solid #d5dbe3; width: 50%; }
+table.sbs td.none { color: #888; font-style: italic; }
+del { background: #fbd5d5; color: #7f1d1d; text-decoration: line-through; }
+ins { background: #cdeccd; color: #14532d; text-decoration: none; }
+.more { color: #666; font-size: 8pt; font-style: italic; margin-top: 3pt; }
+
+table.list { width: 100%; border-collapse: collapse; font-size: 8pt; table-layout: fixed; }
+table.list th { background: #f2f4f7; text-align: left; padding: 3pt; border-bottom: 1pt solid #9aa5b1; font-size: 7.5pt; }
+table.list td { padding: 3pt; border-bottom: 0.5pt solid #d5dbe3; vertical-align: top; overflow-wrap: anywhere; }
+table.list tr { break-inside: avoid; }
+table.list td.id { color: #666; }
+table.counts { border-collapse: collapse; margin: 4pt 0 10pt; font-size: 9pt; }
+table.counts th { text-align: left; color: #555; font-weight: 600; padding: 3pt 14pt 3pt 0; border-bottom: 0.75pt solid #999; }
+table.counts td { padding: 3pt 14pt 3pt 0; }
+table.counts td.n, table.counts th.n { text-align: right; }
+.banner { border: 1.5pt solid #b45309; background: #fff7e6; padding: 8pt 10pt; margin: 8pt 0 12pt; }
+ul.toc { padding-left: 14pt; margin: 4pt 0 10pt; }
+</style>
+</head>
+<body>
+{% macro badges(e) %}
+{% if e.ld.needs_review %}<span class="badge rev">needs review</span>
+{% elif e.ld.category == "Not classified" %}<span class="badge rev">not classified</span>
+{% elif e.ld.substantive %}<span class="badge sub">substantive</span>
+{% else %}<span class="badge non">not substantive</span>{% endif %}
+{% if e.ld.category != "Not classified" %}<span class="badge cat">{{ e.ld.category }}</span>{% endif %}
+{% endmacro %}
+
+{% macro card(e) %}
+<div class="card{{ ' review' if e.ld.needs_review }}" id="{{ e.d.deviation_id }}">
+  <div><span class="id">{{ e.d.deviation_id }} · {{ e.d.change_type.value }}</span><span class="title">{{ e.title }}</span>{{ badges(e) }}</div>
+  {% set t_cite, e_cite = e.cites() %}
+  <div class="cite">Template: {{ t_cite }} &nbsp;|&nbsp; Agreement: {{ e_cite }}</div>
+  {% if e.ld.needs_review %}<div class="reason">Why review: {{ e.ld.review_reason }}</div>{% endif %}
+  {% if e.ld.explanation %}<div class="expl">{{ e.ld.explanation }}</div>{% endif %}
+  {% if e.ld.evidence %}<div class="evidence">Evidence: “{{ e.ld.evidence }}”</div>{% endif %}
+  <table class="sbs">
+    <tr><th>Template</th><th>Agreement</th></tr>
+    <tr>
+      <td{{ ' class="none"'|safe if not e.template_html }}>{{ e.template_html or "Not in the template" }}</td>
+      <td{{ ' class="none"'|safe if not e.executed_html }}>{{ e.executed_html or "Not in the agreement" }}</td>
+    </tr>
+  </table>
+  {% if e.truncated_words %}<div class="more">{{ "{:,}".format(e.truncated_words) }} more words not shown: see the {{ "agreement" if e.whole_section == "added" else "template" }} at the page cited.</div>{% endif %}
+</div>
+{% endmacro %}
+
+<section class="cover">
+  <h1>Deviation report</h1>
+  <div class="sub">{{ r.meta.agreement_title }}<br>compared with {{ r.meta.template_title }}</div>
+  <div class="warning">Prototype — for professional review only.
+    <span>Produced by software for a reviewer to check. It is not legal advice, and every finding should be read against the documents cited.</span></div>
+  <table class="meta">
+    <tr><th>Agreement</th><td>{{ r.meta.agreement_file }}{% if r.meta.signing_date %}, dated {{ r.meta.signing_date }}{% endif %}</td></tr>
+    <tr><th>Template</th><td>{{ r.meta.template_file }}{% if r.meta.template_version %} ({{ r.meta.template_version }}){% endif %}</td></tr>
+    <tr><th>Classification</th><td>{{ r.meta.classification }}</td></tr>
+    <tr><th>Generated</th><td>{{ r.meta.generated }} (run {{ r.meta.run_id }})</td></tr>
+  </table>
+</section>
+
+{% set c = r.counts %}
+<section class="part" id="summary">
+  <h2>Summary</h2>
+  {% if not r.classified %}
+  <div class="banner">The deviations in this report have <b>not been classified</b>: there are no categories, substantive flags or explanations, and every deviation is shown as if substantive. Run the pipeline with an LLM API key to add them.</div>
+  {% endif %}
+  <table class="counts">
+    <tr><td>Deviations found</td><td class="n">{{ c.total }}</td></tr>
+    <tr><td>Substantive{% if not r.classified %} (or not classified){% endif %}</td><td class="n">{{ c.substantive }}</td></tr>
+    <tr><td>Not substantive, including {{ c.fill_in }} filled-in template blanks and {{ c.renumbered }} renumbered sections</td><td class="n">{{ c.non_substantive }}</td></tr>
+    <tr><td>Needs review</td><td class="n">{{ c.needs_review }}</td></tr>
+  </table>
+  <p class="intro">Defined-term changes: {{ c.definitions }}. Sections added in full: {{ c.sections_added }}; removed in full: {{ c.sections_removed }}. Each deviation appears in one place in this report, under the first heading below that fits it.</p>
+
+  {% if r.category_counts %}
+  <h3>By category</h3>
+  <table class="counts">
+    <tr><th>Category</th><th class="n">Substantive</th><th class="n">Not substantive</th><th class="n">Needs review</th></tr>
+    {% for name, sub, non, rev in r.category_counts %}
+    <tr><td>{{ name }}</td><td class="n">{{ sub }}</td><td class="n">{{ non }}</td><td class="n">{{ rev }}</td></tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+
+  <h3>Contents</h3>
+  <ul class="toc">
+    <li><a href="#definitions">Defined-term changes</a> ({{ r.definitions|length }})</li>
+    <li>{{ "Substantive deviations by category" if r.classified else "Deviations by section" }}
+      <ul>{% for g in r.groups %}<li><a href="#{{ g.slug }}">{{ g.name }}</a> ({{ g.entries|length }})</li>{% endfor %}</ul></li>
+    <li><a href="#sections">Sections added and removed</a> ({{ r.sections_added|length }} / {{ r.sections_removed|length }})</li>
+    <li><a href="#non-substantive">Non-substantive changes</a> ({{ r.non_substantive|length }})</li>
+    <li><a href="#needs-review">Needs review</a> ({{ r.needs_review|length }} deviations, {{ r.unreadable_pages|length }} pages)</li>
+    <li><a href="#method">Method note</a></li>
+  </ul>
+</section>
+
+<section class="part" id="definitions">
+  <h2>Defined-term changes</h2>
+  <p class="intro">These come first because a changed definition changes every provision that uses the term. {{ "Substantive changes only; the others are in the non-substantive table." if r.classified else "" }}</p>
+  {% for e in r.definitions %}{{ card(e) }}{% else %}<p>None.</p>{% endfor %}
+</section>
+
+{% for g in r.groups %}
+<section class="part" id="{{ g.slug }}">
+  <h2>{{ g.name }}</h2>
+  <p class="intro">{{ g.entries|length }} {{ "substantive deviation" if r.classified else "deviation" }}{{ "s" if g.entries|length != 1 }} inside sections that both documents have{{ "" if r.classified else ", in document order" }}.</p>
+  {% for e in g.entries %}{{ card(e) }}{% endfor %}
+</section>
+{% endfor %}
+
+<section class="part" id="sections">
+  <h2>Sections added and removed</h2>
+  <p class="intro">Sections found in only one of the documents. A section that was moved and rewritten, or merged into another, can also show up here, as one section removed and one added.</p>
+  <h3>Added in the agreement ({{ r.sections_added|length }})</h3>
+  {% for e in r.sections_added %}{{ card(e) }}{% else %}<p>None.</p>{% endfor %}
+  <h3>Removed from the template ({{ r.sections_removed|length }})</h3>
+  {% for e in r.sections_removed %}{{ card(e) }}{% else %}<p>None.</p>{% endfor %}
+</section>
+
+<section class="part" id="non-substantive">
+  <h2>Non-substantive changes</h2>
+  <p class="intro">Changes that leave the meaning the same, template blanks filled in as the template provides, and sections renumbered. Deleted words are struck through; inserted words are underlaid in green.</p>
+  {% if r.non_substantive %}
+  <table class="list">
+    <tr><th style="width:7%">ID</th><th style="width:9%">Change</th><th style="width:17%">Template</th><th style="width:17%">Agreement</th><th style="width:11%">Category</th><th>What changed</th></tr>
+    {% for e in r.non_substantive %}
+    <tr><td class="id">{{ e.d.deviation_id }}</td><td>{{ e.d.change_type.value }}</td><td>{{ e.template }}</td><td>{{ e.executed }}</td><td>{{ e.ld.category }}</td>
+      <td>{{ e.snippet }}{% if e.ld.explanation and e.ld.category not in ("Fill-in", "Renumbering") %}<br><span class="intro">{{ e.ld.explanation }}</span>{% endif %}</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}<p>None.</p>{% endif %}
+</section>
+
+<section class="part" id="needs-review">
+  <h2>Needs review</h2>
+  <p class="intro">Labels that failed a check (for example, an evidence quote not found in the agreement) or that could not be placed in a category, and pages with no text to compare. Read these against the documents.</p>
+  {% for e in r.needs_review %}{{ card(e) }}{% else %}<p>No deviation needs review.</p>{% endfor %}
+  <h3>Pages not compared</h3>
+  {% if r.unreadable_pages %}
+  <p class="intro">These pages have almost no text layer (for example, signature pages scanned as images, or exhibits that are only a heading), so their content was not compared.</p>
+  <table class="list" style="width:60%">
+    <tr><th>Document</th><th>PDF page</th><th>Printed page</th></tr>
+    {% for doc, pdf, label in r.unreadable_pages %}<tr><td>{{ doc }}</td><td>{{ pdf }}</td><td>{{ label or "none" }}</td></tr>{% endfor %}
+  </table>
+  {% else %}<p>None: every page had text.</p>{% endif %}
+</section>
+
+<section class="part" id="method">
+  <h2>Method note</h2>
+  <p><b>Text.</b> Both PDFs are read page by page with PyMuPDF. Running headers and footers, page numbers and the template's drafting footnotes are removed, and quote marks, dashes and ligatures are made uniform, so formatting differences do not show up as changes.</p>
+  <p><b>Sections.</b> Each document is split at its headings (Sections, lettered and numbered clauses, schedules and exhibits). Template sections are paired with agreement sections by number, then by caption, then by meaning (sentence embeddings, threshold {{ r.meta.threshold }}). Of {{ r.alignment.values()|sum }} pairings: {% for k, v in r.alignment.items() %}{{ v }} {{ k }}{{ ", " if not loop.last else "." }}{% endfor %} A clause that was merged into another or split in two shows up as one section removed and one added.</p>
+  <p><b>Deviations.</b> Paired sections are compared sentence by sentence, and definitions term by term. A sentence that differs only where the template has a blank or bracketed option is a fill-in, not a negotiated change. A section that moved to another number is listed as renumbered.</p>
+  <p><b>Classification.</b> {{ r.meta.classification_method }}</p>
+  <p><b>Citations.</b> Pages are the page numbers printed on the documents, with the PDF page in brackets when it differs.</p>
+  <p><b>Limits.</b> This is a Phase 0 prototype. Pages without a text layer are not compared. Tables are compared as text in reading order. The categories and the definition of a substantive change are drafts until the advisor confirms them.</p>
+  <p class="intro">Template: {{ r.meta.template_id }}. Agreement: {{ r.meta.agreement_id }}. Run {{ r.meta.run_id }}.</p>
+</section>
+</body>
+</html>

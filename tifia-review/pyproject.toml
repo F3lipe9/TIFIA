@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tifia-review"
+version = "0.1.0"
+description = "Prototype: deviation report between the TIFIA borrower TLA template and an executed agreement"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pymupdf>=1.24",
+    "sentence-transformers>=3.0",
+    "weasyprint>=62",
+    "jinja2>=3.1",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+anthropic = ["anthropic>=0.97"]  # structured outputs (output_config)
+openai = ["openai>=1.50"]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[project.scripts]
+tifia-review = "tifia_review.cli:main"  # run from the project folder
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tifia_review"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]

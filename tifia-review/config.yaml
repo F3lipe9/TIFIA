@@ -1,0 +1,74 @@
+paths:
+  templates_dir: data/templates
+  agreements_dir: data/agreements
+  manifest: data/manifest.csv
+  gold_dir: data/gold
+  outputs_dir: outputs
+  cache_db: outputs/cache.sqlite
+
+loader:
+  scanned_page_min_chars: 50   # page with fewer chars gets needs_review
+  max_low_text_fraction: 0.25  # more low-text pages than this -> is_scanned True
+
+pipeline:
+  # template for a manifest row with an empty `template` column. The 2021 agreements
+  # predate the 2023 templates and are tax-backed: the non-project template may fit better.
+  default_template: tla_template_2023_public_project_revenue
+
+aligner:
+  similarity_threshold: 0.80   # embedding fallback cutoff
+  embedding_model: sentence-transformers/all-MiniLM-L6-v2
+
+llm:
+  provider: anthropic          # provider class in llm/client.py
+  model: claude-sonnet-5-5     # no temperature setting: current Claude models reject it
+  api_key_env: LLM_API_KEY     # set in .env; without it the SDK uses ANTHROPIC_API_KEY
+  effort: medium               # low | medium | high (model default); thinking is adaptive
+  max_tokens: 16000            # per reply, thinking included
+  batch_size: 15               # deviations per call (10-20)
+  max_batch_chars: 40000       # ... and about this much deviation JSON at most per call
+  max_retries: 1               # a label that fails a check is sent once more
+  price_per_mtok:              # USD for the model above, for the cost log
+    input: 2.00
+    output: 10.00
+    cache_write: 2.50          # 5-minute prompt cache
+    cache_read: 0.20
+  budget_usd: 300
+
+# DRAFT: finalize names and definitions with the advisor (docs/taxonomy-draft.md).
+# "unclear" is always allowed. Changing any of this invalidates cached labels.
+taxonomy:
+  Definitions: >-
+    A defined term was added, removed or redefined, in Section 1 or wherever the term is
+    defined. A changed definition changes every provision that uses the term.
+  Payment terms: >-
+    The loan amount, interest rate, disbursements, payment dates, amortization,
+    prepayment and fees, and the security, pledged revenues and flow of funds that repay
+    the loan.
+  Conditions precedent: >-
+    What must happen before the agreement takes effect or before a disbursement,
+    including documents, certificates and legal opinions to be delivered.
+  Covenants: >-
+    What the borrower must or must not do while the loan is outstanding: affirmative and
+    negative covenants, including reporting, notices, insurance, accounts, additional
+    debt and compliance with federal requirements.
+  Events of default: >-
+    Events of default, cure periods, remedies, acceleration and the lender's rights after
+    a default.
+  Other: >-
+    Anything else, including representations and warranties, general provisions
+    (notices, governing law, amendments, counterparts) and forms in the exhibits.
+
+# DRAFT definition of a substantive change, for the advisor to confirm.
+substantive: >-
+  A change is substantive if it changes what a party must do, may do or will receive: an
+  obligation, right, condition, deadline, amount, rate, threshold or remedy, or the scope
+  of a defined term. Changes that leave the meaning the same are not substantive:
+  wording, style, punctuation, cross-references and numbering.
+
+evaluation:
+  match_text_overlap: 0.50     # min text overlap to match predicted vs gold
+  target_recall: 0.90          # proposal, set with advisor before week 8
+  target_precision: 0.70
+  threshold_agreed: ""         # who agreed the targets, when, where it is written down
+  holdout: []                  # doc_ids not looked at in week 9; score once with --holdout
