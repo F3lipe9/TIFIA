@@ -79,6 +79,8 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
         template_id = manifest[doc_id].get("template") or config["pipeline"]["default_template"]
         result = pipeline.run(source(manifest[doc_id], root), source(manifest[template_id], root))
         c = result.counts
+        if result.structure is not None:
+            print(result.structure.summary_line(doc_id))
         line = (f"{doc_id} vs {template_id}: {c['total']} deviations, {c['substantive']} "
                 f"substantive, {c['needs_review']} need review -> "
                 f"{result.pdf.relative_to(root) if result.pdf.is_relative_to(root) else result.pdf}"
@@ -127,12 +129,23 @@ def latest_run(outputs: Path, doc_id: str) -> str | None:
     return max(runs, key=lambda p: (p / doc_id / "classify.json").stat().st_mtime).name
 
 
+def structure_status(store: RunStore) -> str | None:
+    """The executed agreement's structure status in a run, None for runs made before
+    structure.json existed."""
+    if not store.exists("structure"):
+        return None
+    data = json.loads(store.path("structure").read_text(encoding="utf-8"))
+    return (data.get("executed") or {}).get("status")
+
+
 def evaluate_main(argv: list[str] | None = None, root: Path | None = None) -> int:
     """Score pipeline runs against the advisor's answer keys (PHASE0 week 8).
 
     python scripts/evaluate.py                  # every agreement with an answer key
     python scripts/evaluate.py tla_2021_drle    # only these
     python scripts/evaluate.py --holdout        # the held-out agreements, once, in week 9
+    python scripts/evaluate.py --include-degraded  # also agreements whose sections were
+                                                   # not all found (skipped by default)
     python scripts/evaluate.py --causes outputs/evaluation/<time>/errors.csv
     """
     parser = argparse.ArgumentParser(description=evaluate_main.__doc__.split("\n\n")[0])
@@ -142,6 +155,9 @@ def evaluate_main(argv: list[str] | None = None, root: Path | None = None) -> in
     parser.add_argument("--holdout", action="store_true",
                         help="score only the held-out agreements (config evaluation.holdout)")
     parser.add_argument("--gold-dir", help="answer-key folder (default: paths.gold_dir)")
+    parser.add_argument("--include-degraded", action="store_true",
+                        help="also score agreements whose sections were not all found "
+                             "(structure.json status degraded)")
     parser.add_argument("--causes", metavar="ERRORS_CSV",
                         help="rank the causes in a filled-in error worksheet, then stop")
     args = parser.parse_args(argv)
@@ -178,12 +194,17 @@ def evaluate_main(argv: list[str] | None = None, root: Path | None = None) -> in
 
     outputs = root / config["paths"]["outputs_dir"]
     min_overlap = settings["match_text_overlap"]
-    results, rows = [], []
+    results, rows, skipped = [], [], []
     for doc_id in doc_ids:
         run_id = args.run or latest_run(outputs, doc_id)
         if run_id is None or not (outputs / run_id / doc_id / "classify.json").exists():
             raise SystemExit(f"no pipeline run of {doc_id}: run python scripts/run.py first")
         store = RunStore(outputs, f"{run_id}/{doc_id}")
+        if not args.include_degraded and structure_status(store) == "degraded":
+            print(f"{doc_id}: not scored, its document structure is degraded "
+                  f"(see {run_id}/{doc_id}/structure.json; --include-degraded to score it)")
+            skipped.append(doc_id)
+            continue
         labeled = store.load("classify", list[LabeledDeviation])
         context = RunContext(store.load("load_executed", Document),
                              store.load("segment_template", SegmentedDocument),
@@ -193,6 +214,9 @@ def evaluate_main(argv: list[str] | None = None, root: Path | None = None) -> in
         results.append(result)
         rows += error_rows(result, context, min_overlap)
 
+    if not results:
+        print("nothing to score: every agreement asked for is degraded")
+        return 1
     total = Scores()
     for result in results:
         total.add(result.scores)
@@ -204,6 +228,8 @@ def evaluate_main(argv: list[str] | None = None, root: Path | None = None) -> in
             if args.holdout else
             f"Held out, not scored here: {', '.join(sorted(holdout))}." if holdout else
             "No agreement is held out yet (config evaluation.holdout); PHASE0 asks for one.")
+    if skipped:
+        note += (f" Not scored, document structure degraded: {', '.join(skipped)}.")
     ranking = rank_causes(rows)
     (out / "results.md").write_text(results_markdown(
         results, total, settings, ranking, note, when.strftime("%B %d, %Y %H:%M"),

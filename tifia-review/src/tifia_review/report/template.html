@@ -97,6 +97,9 @@ ul.toc { padding-left: 14pt; margin: 4pt 0 10pt; }
   <div class="sub">{{ r.meta.agreement_title }}<br>compared with {{ r.meta.template_title }}</div>
   <div class="warning">Prototype — for professional review only.
     <span>Produced by software for a reviewer to check. It is not legal advice, and every finding should be read against the documents cited.</span></div>
+  {% if r.meta.structure_warning %}
+  <div class="warning">{{ r.meta.structure_warning }}</div>
+  {% endif %}
   <table class="meta">
     <tr><th>Agreement</th><td>{{ r.meta.agreement_file }}{% if r.meta.signing_date %}, dated {{ r.meta.signing_date }}{% endif %}</td></tr>
     <tr><th>Template</th><td>{{ r.meta.template_file }}{% if r.meta.template_version %} ({{ r.meta.template_version }}){% endif %}</td></tr>

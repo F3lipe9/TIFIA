@@ -15,6 +15,14 @@ pipeline:
   # predate the 2023 templates and are tax-backed: the non-project template may fit better.
   default_template: tla_template_2023_public_project_revenue
 
+segmentation:
+  recovery:                     # find sections whose "Section N." was lost (Section_Recovery.md)
+    enabled: true
+    min_text_coverage: 0.98     # section text / body text after the TOC; below: degraded
+    toc_search_fraction: 0.10   # look for the TOC in the first 10% of pages (at least 10)
+    toc_min_entries_ratio: 0.80 # TOC with fewer entries than this x the template's
+                                # sections: recover with the template's titles instead
+
 aligner:
   similarity_threshold: 0.80   # embedding fallback cutoff
   embedding_model: sentence-transformers/all-MiniLM-L6-v2

@@ -21,7 +21,14 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from tifia_review.models import DefinedTerm, Document, Page, Section, SegmentedDocument
+from tifia_review.models import (
+    BoundarySource, DefinedTerm, Document, Page, Section, SegmentedDocument, TocEntry,
+)
+from tifia_review.segment.recovery import HeadingRecovery
+from tifia_review.segment.structure import StructureCheck
+from tifia_review.segment.toc import TocParser, find_toc_pages, is_numbered, parse_toc
+
+__all__ = ["PageMap", "Segmenter", "TocEntry", "find_toc_pages", "parse_toc"]
 
 log = logging.getLogger(__name__)
 
@@ -132,72 +139,10 @@ class PageMap:
 
 
 # ---------------------------------------------------------------------------------
-# Table of contents
+# Table of contents: segment/toc.py (find_toc_pages, parse_toc re-exported here)
 # ---------------------------------------------------------------------------------
-@dataclass
-class TocEntry:
-    section_id: str          # same form as Section.section_id: "7", "Exhibit H-1"
-    title: str
-    page_label: str | None   # printed page number; listed for numbered sections only
-
-
-_TOC_FRONT_PAGES = 10  # the TOC must start within this many pages
-_TOC_TITLE = re.compile(r"^[ \t]*table of contents[ \t]*$", re.IGNORECASE | re.MULTILINE)
-_DOT_LEADER = re.compile(r"\.{4,}[ \t]*\d{1,3}[ \t]*$", re.MULTILINE)
-# "Section 7. \nOutstanding TIFIA Loan Balance; ... Loan \nAmortization Schedule.....34"
-_TOC_SECTION = re.compile(
-    r"^[ \t]*(?:Section|SECTION)[ \t]+(\d{1,3})\."
-    r"((?:(?!\n[ \t]*(?:Section|SECTION)[ \t])[\s\S])*?)"
-    r"\.{4,}[ \t]*(\d{1,3})[ \t]*$",
-    re.MULTILINE,
-)
-# "EXHIBIT H-1 – Opinions Required from Counsel ...", "[SCHEDULE III – Existing ...]"
-_TOC_ATTACHMENT = re.compile(r"[ \t]*(\[)?[ \t]*(SCHEDULE|EXHIBIT)[ \t]+(\S+)[ \t]+[–—-][ \t]+(.*)")
-
-
-def _is_toc_page(text: str, continuing: bool) -> bool:
-    if _TOC_TITLE.search(text) or len(_DOT_LEADER.findall(text)) >= 3:
-        return True
-    # a later TOC page may hold only the schedule and exhibit list
-    lines = [line for line in text.splitlines() if line.strip()]
-    entries = sum(1 for line in lines if _DOT_LEADER.search(line) or _TOC_ATTACHMENT.match(line))
-    return continuing and bool(lines) and 2 * entries >= len(lines)
-
-
-def find_toc_pages(texts: list[str]) -> range:
-    """Indexes of the table-of-contents pages; an empty range if there is no TOC."""
-    for i, text in enumerate(texts[:_TOC_FRONT_PAGES]):
-        if _is_toc_page(text, continuing=False):
-            end = i + 1
-            while end < len(texts) and _is_toc_page(texts[end], continuing=True):
-                end += 1
-            return range(i, end)
-    return range(0)
-
-
 def _squash(text: str) -> str:
     return " ".join(text.split())
-
-
-def parse_toc(texts: list[str]) -> list[TocEntry]:
-    """Numbered sections (with page numbers), then schedules and exhibits."""
-    toc = "\n".join(texts)
-    entries = [TocEntry(m.group(1), _squash(m.group(2)).rstrip(". "), m.group(3))
-               for m in _TOC_SECTION.finditer(toc)]
-    current, bracketed = None, False
-    for line in toc.splitlines():
-        m = _TOC_ATTACHMENT.match(line)
-        if m:
-            bracketed = bool(m.group(1))
-            current = TocEntry(f"{m.group(2).title()} {m.group(3)}", _squash(m.group(4)), None)
-            entries.append(current)
-        elif not line.strip():
-            current = None
-        elif current:  # wrapped title
-            current.title = _squash(f"{current.title} {line}")
-        if current and bracketed and current.title.endswith("]"):
-            current.title = current.title[:-1].rstrip()
-    return entries
 
 
 # ---------------------------------------------------------------------------------
@@ -273,6 +218,7 @@ class _Candidate:
     ident: str           # section number, attachment id or clause label
     caption: str = ""
     standalone: bool = False  # clause label alone on its line
+    source: BoundarySource = BoundarySource.NUMBERED
 
 
 @dataclass
@@ -282,6 +228,7 @@ class _Heading:
     section_id: str
     heading: str
     parent_id: str | None
+    source: BoundarySource = BoundarySource.NUMBERED
 
 
 @dataclass
@@ -397,7 +344,7 @@ def _resolve(found: list[_Candidate], toc_titles: dict[str, str]) -> list[_Headi
                 log.debug("skipping repeated heading %s at %d", c.ident, c.pos)
                 continue
             heading = toc_titles.get(c.ident, c.caption) if c.kind == "attachment" else c.caption
-            heads.append(_Heading(c.pos, 1, c.ident, heading, None))
+            heads.append(_Heading(c.pos, 1, c.ident, heading, None, c.source))
             used.add(c.ident)
             stack, top_id = [], c.ident
             if c.kind == "attachment":
@@ -437,6 +384,7 @@ def _build_sections(heads: list[_Heading], pmap: PageMap) -> list[Section]:
             label_end=pmap.pages[last].printed_label,
             level=h.level, parent_id=h.parent_id,
             page_breaks=[pmap.offsets[k] - h.pos for k in range(first + 1, last + 1)],
+            boundary_source=h.source,
         ))
     return sections
 
@@ -513,35 +461,101 @@ def toc_mismatches(sections: list[Section], toc: list[TocEntry]) -> list[str]:
     return problems
 
 
+DEFAULT_RECOVERY = {
+    "enabled": True,
+    "min_text_coverage": 0.98,
+    "toc_search_fraction": 0.10,    # look for the TOC in the first 10% of pages (at least 10)
+    "toc_min_entries_ratio": 0.80,  # a TOC with fewer entries than this x the template's
+                                    # sections: recover with the template's titles instead
+}
+
+
+def reference_entries(seg: SegmentedDocument) -> list[TocEntry]:
+    """A segmented template's numbered sections, the list recovery falls back on."""
+    return [TocEntry(s.section_id, s.heading) for s in seg.sections
+            if s.level == 1 and s.section_id.isdigit()]
+
+
+def body_texts(doc: Document) -> tuple[list[str], int]:
+    """Each page's text without its footnote area and reference marks, and how many
+    pages had footnotes cut."""
+    texts, expected, cut = [], 1, 0
+    for page in doc.pages:
+        first = expected
+        body, notes, expected = split_footnotes(page.text, expected)
+        if notes:
+            body = strip_footnote_refs(body, footnote_numbers(notes, first, expected))
+            cut += 1
+        texts.append(body)
+    return texts, cut
+
+
 class Segmenter:
-    def segment(self, doc: Document) -> SegmentedDocument:
+    def __init__(self, recovery: dict | None = None):
+        """recovery: config.yaml segmentation.recovery (keys of DEFAULT_RECOVERY)."""
+        self.recovery = {**DEFAULT_RECOVERY, **(recovery or {})}
+        self.toc_parser = TocParser(self.recovery["toc_search_fraction"])
+        self.check = StructureCheck(self.recovery["min_text_coverage"])
+
+    def _expected(self, toc: list[TocEntry], reference: list[TocEntry] | None
+                  ) -> tuple[list[TocEntry], str]:
+        """The document's own numbered TOC entries, or the template's sections when there
+        is no TOC or it lists fewer than toc_min_entries_ratio of them."""
+        ref = [e for e in reference or [] if is_numbered(e)]
+        if toc and (not ref or len(toc) >= self.recovery["toc_min_entries_ratio"] * len(ref)):
+            return toc, "toc"
+        if ref:
+            return ref, "template"
+        return [], "none"
+
+    def segment(self, doc: Document, reference: list[TocEntry] | None = None
+                ) -> SegmentedDocument:
         """Sections in document order (parents before children) and defined terms.
 
         Text before Section 1 (after any TOC) becomes the "preamble" section; the cover
-        page and TOC pages belong to no section.
+        page and TOC pages belong to no section. When numbered sections listed in the TOC
+        (or, failing a TOC, in reference: the template's sections) were not found, they
+        are searched for by title (segment/recovery.py); the result's structure says how
+        complete the sections are.
         """
-        texts, expected, cut = [], 1, 0
-        for page in doc.pages:
-            first = expected
-            body, notes, expected = split_footnotes(page.text, expected)
-            if notes:
-                body = strip_footnote_refs(body, footnote_numbers(notes, first, expected))
-                cut += 1
-            texts.append(body)
+        texts, cut = body_texts(doc)
         pmap = PageMap(doc.pages, texts)
+        full = pmap.full_text
 
         raw = [p.text for p in doc.pages]
-        toc_pages = find_toc_pages(raw)
-        toc = parse_toc([raw[i] for i in toc_pages])
-        body_start = toc_pages.stop
+        parsed = self.toc_parser.parse(raw, [p.pdf_index for p in doc.pages])
+        toc, body_start = parsed.entries, parsed.toc_end
+        attachment_titles = {e.section_id: e.title for e in toc if e.page_label is None}
+        body_pos = pmap.offsets[body_start] if body_start < len(texts) else len(full)
 
-        heads = _resolve(_scan(pmap, texts, body_start),
-                         {e.section_id: e.title for e in toc if e.page_label is None})
-        preamble_pos = pmap.offsets[body_start] if body_start < len(texts) else len(pmap.full_text)
-        first_pos = heads[0].pos if heads else len(pmap.full_text)
-        if pmap.full_text[preamble_pos:first_pos].strip():
-            heads.insert(0, _Heading(preamble_pos, 1, PREAMBLE_ID, "Preamble", None))
+        candidates = _scan(pmap, texts, body_start)
+        heads = _resolve(candidates, attachment_titles)
+        wanted, expected_from = self._expected(parsed.numbered, reference)
+        first_pass = {h.section_id: h.pos for h in heads
+                      if h.level == 1 and h.section_id.isdigit()}
+        recovered, warnings = [], []
+        if self.recovery["enabled"] and any(e.section_id not in first_pass for e in wanted):
+            # the body ends at the signatures or the first attachment
+            body_end = next((h.pos for h in heads if h.level == 1 and h.pos >= body_pos
+                             and not h.section_id.isdigit()), len(full))
+            source = (BoundarySource.TOC_TITLE if expected_from == "toc"
+                      else BoundarySource.TEMPLATE_TITLE)
+            result = HeadingRecovery().recover(full, wanted, first_pass, body_pos, body_end,
+                                               source, pmap.offsets)
+            if result.boundaries:
+                candidates = sorted(candidates + [
+                    _Candidate(b.pos, "section", b.section_id, b.title, source=b.source)
+                    for b in result.boundaries], key=lambda c: c.pos)
+                heads = _resolve(candidates, attachment_titles)
+                recovered = [b.section_id for b in result.boundaries]
+            warnings = result.warnings
+
+        first_pos = heads[0].pos if heads else len(full)
+        if full[body_pos:first_pos].strip():
+            heads.insert(0, _Heading(body_pos, 1, PREAMBLE_ID, "Preamble", None))
         sections = _build_sections(heads, pmap)
+        structure = self.check.check(sections, wanted, expected_from, full[body_pos:],
+                                     recovered, warnings)
 
         definitions = find_definitions_section(sections)
         terms = parse_definitions(definitions) if definitions else {}
@@ -549,6 +563,10 @@ class Segmenter:
             log.warning("%s: no definitions section found", doc.doc_id)
         for problem in toc_mismatches(sections, toc):
             log.warning("%s: %s", doc.doc_id, problem)
+        if structure.status != "complete":
+            log.warning("%s", structure.summary_line(doc.doc_id))
+            for problem in structure.problems:
+                log.warning("%s: %s", doc.doc_id, problem)
         log.info("%s: %d sections (%d top level), %d defined terms; footnotes cut on %d pages",
                  doc.doc_id, len(sections), sum(s.level == 1 for s in sections), len(terms), cut)
-        return SegmentedDocument(doc.doc_id, sections, terms)
+        return SegmentedDocument(doc.doc_id, sections, terms, structure)

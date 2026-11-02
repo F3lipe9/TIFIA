@@ -2,7 +2,8 @@
 executed agreement against its template.
 
 Every stage's output is saved to outputs/<run_id>/<executed doc_id>/<stage>.json
-(store.RunStore), so any stage can be rerun or debugged from the one before; the report
+(store.RunStore), so any stage can be rerun or debugged from the one before;
+structure.json says whether each document's sections were all found (segment/). The report
 goes next to them as report.html and report.pdf, and the PDF is copied to
 outputs/reports/<executed>__vs__<template>.pdf. The two-page executive summary
 (summary/, config summary) goes next to them as summary.html/.pdf/.json, copied to
@@ -21,9 +22,9 @@ from tifia_review.classifier import Classifier, unclassified
 from tifia_review.diff_engine import DiffEngine
 from tifia_review.llm.client import LLMClient, Usage, make_client
 from tifia_review.loader import DocumentLoader
-from tifia_review.models import Document, SegmentedDocument
+from tifia_review.models import Document, SegmentedDocument, StructureReport, TocEntry
 from tifia_review.report.builder import build_report_data, write_report
-from tifia_review.segmenter import Segmenter
+from tifia_review.segmenter import Segmenter, reference_entries
 from tifia_review.store import ResultCache, RunStore, new_run_id
 from tifia_review.summary.builder import SummaryTooLong
 from tifia_review.summary.summarize import Summarizer
@@ -56,6 +57,17 @@ class Result:
     stats: dict = field(default_factory=dict)
     summary_pdf: Path | None = None  # outputs/reports/<executed>_summary.pdf
     summary_note: str = ""           # why there is no summary, or how it was shortened
+    structure: StructureReport | None = None  # the executed agreement's
+
+
+def structure_warning(structure: StructureReport) -> str:
+    """The report cover's notice for a degraded document."""
+    n = len(structure.missing)
+    if n:
+        return (f"Document structure partly unrecovered: {n} section{'s' if n != 1 else ''} "
+                "could not be located. Citations for nearby changes may be imprecise.")
+    return ("Document structure partly unrecovered: " + "; ".join(structure.problems)
+            + ". Citations for nearby changes may be imprecise.")
 
 
 class Pipeline:
@@ -69,7 +81,7 @@ class Pipeline:
         loader, aligner = config["loader"], config["aligner"]
         self.loader = DocumentLoader(loader["scanned_page_min_chars"],
                                      loader["max_low_text_fraction"])
-        self.segmenter = Segmenter()
+        self.segmenter = Segmenter((config.get("segmentation") or {}).get("recovery"))
         self.aligner = Aligner(threshold=aligner["similarity_threshold"],
                                model_name=aligner["embedding_model"])
         self.engine = DiffEngine()
@@ -88,7 +100,8 @@ class Pipeline:
     def run(self, executed: Source, template: Source) -> Result:
         store = RunStore(self.outputs, f"{self.run_id}/{executed.doc_id}")
         t_doc, t_seg = self._load(template)
-        e_doc, e_seg = self._load(executed)
+        e_doc, e_seg = self._load(executed, reference_entries(t_seg))
+        store.save("structure", {"executed": e_seg.structure, "template": t_seg.structure})
         for stage, output in (("load_template", t_doc), ("load_executed", e_doc),
                               ("segment_template", t_seg), ("segment_executed", e_seg)):
             store.save(stage, output)
@@ -108,8 +121,11 @@ class Pipeline:
             labeled = unclassified(deviations)
         store.save("classify", labeled)
 
+        meta = self._meta(executed, template)
+        if e_seg.structure is not None and e_seg.structure.degraded:
+            meta["structure_warning"] = structure_warning(e_seg.structure)
         data = build_report_data(labeled, t_doc, e_doc, t_seg, e_seg, alignments,
-                                 list(self.config["taxonomy"]), self._meta(executed, template))
+                                 list(self.config["taxonomy"]), meta)
         _, pdf, renderer = write_report(data, store.dir)
         reports = self.outputs / "reports"
         reports.mkdir(parents=True, exist_ok=True)
@@ -121,7 +137,7 @@ class Pipeline:
             client = self.classifier.client
             usage = Usage(**{k: v - getattr(before, k) for k, v in vars(client.usage).items()})
         return Result(executed.doc_id, template.doc_id, copy, store.dir, renderer, data.counts,
-                      usage, stats, summary_pdf, note)
+                      usage, stats, summary_pdf, note, e_seg.structure)
 
     def _summary(self, executed: Source, template: Source, labeled, counts, t_seg, e_seg,
                  alignments, e_doc, store: RunStore, full_report: str
@@ -146,10 +162,12 @@ class Pipeline:
         shutil.copyfile(pdf, copy)
         return copy, "shortened to fit" if shown.level else ""
 
-    def _load(self, source: Source) -> tuple[Document, SegmentedDocument]:
+    def _load(self, source: Source, reference: list[TocEntry] | None = None
+              ) -> tuple[Document, SegmentedDocument]:
+        """reference: the template's sections, for recovery when the document has no TOC."""
         if source.doc_id not in self._docs:
             doc = self.loader.load(str(source.path), source.doc_id, source.doc_type)
-            self._docs[source.doc_id] = (doc, self.segmenter.segment(doc))
+            self._docs[source.doc_id] = (doc, self.segmenter.segment(doc, reference))
         return self._docs[source.doc_id]
 
     def _meta(self, executed: Source, template: Source) -> dict:

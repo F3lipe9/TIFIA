@@ -20,6 +20,15 @@ class Document:
     is_scanned: bool = False
 
 
+class BoundarySource(Enum):
+    """How a top-level section's start was found (segment/recovery.py)."""
+    NUMBERED = "numbered"              # its "Section N." heading, by the normal segmenter
+    SECTION_NUMBER = "section_number"  # a "Section N." line whose caption the first pass
+                                       # could not read ("Definitions.Unless ..."), by recovery
+    TOC_TITLE = "toc_title"            # its title, from the document's own TOC, by recovery
+    TEMPLATE_TITLE = "template_title"  # its title, from the template's sections, by recovery
+
+
 @dataclass
 class Section:
     section_id: str  # normalized, e.g. "4", "12(a)(xii)", "Exhibit D", "preamble"
@@ -34,6 +43,7 @@ class Section:
     # offsets in text where the next PDF page starts: offset o is on PDF page
     # pdf_start + bisect_right(page_breaks, o)
     page_breaks: list[int] = field(default_factory=list)
+    boundary_source: BoundarySource = BoundarySource.NUMBERED
 
 
 @dataclass
@@ -44,10 +54,53 @@ class DefinedTerm:
 
 
 @dataclass
+class TocEntry:
+    """One entry of a table of contents (or of the template's section list)."""
+    section_id: str          # same form as Section.section_id: "7", "Exhibit H-1"
+    title: str               # "TIFIA Loan Amount"
+    page_label: str | None = None  # printed page number; listed for numbered sections only
+    toc_page: int | None = None    # pdf_index of the TOC page it is on; None from the template
+
+
+@dataclass
+class StructureReport:
+    """Whether the numbered sections found match the expected list (segment/structure.py)."""
+    expected: int                    # numbered sections expected (TOC or template)
+    found: int                       # of those, present after recovery
+    recovered: list[str]             # section IDs added by recovery
+    missing: list[str]               # expected but still not found
+    text_coverage: float             # section chars / body chars (non-space)
+    status: str                      # "complete" | "recovered" | "degraded"
+    expected_from: str = "toc"       # "toc" | "template" | "none"
+    numbered: int = 0                # found by the normal segmenter
+    problems: list[str] = field(default_factory=list)  # order/duplicate/coverage failures
+    warnings: list[str] = field(default_factory=list)  # e.g. a title found twice
+
+    @property
+    def degraded(self) -> bool:
+        return self.status == "degraded"
+
+    def summary_line(self, doc_id: str) -> str:
+        """'doc: 39/39 sections (13 numbered, 26 recovered from TOC), coverage 99.9%'."""
+        source = {"toc": "TOC", "template": "template titles"}.get(self.expected_from, "")
+        parts = [f"{self.numbered} numbered"]
+        if self.recovered:
+            parts.append(f"{len(self.recovered)} recovered from {source}")
+        if self.missing:
+            parts.append(f"{len(self.missing)} missing: {', '.join(self.missing)}")
+        line = (f"{doc_id}: {self.found}/{self.expected} sections ({', '.join(parts)}), "
+                f"coverage {self.text_coverage:.1%}")
+        if self.expected_from == "none":
+            line = f"{doc_id}: {self.found} sections (no TOC or template list to check), "                    f"coverage {self.text_coverage:.1%}"
+        return line + (" [DEGRADED]" if self.degraded else "")
+
+
+@dataclass
 class SegmentedDocument:
     doc_id: str
     sections: list[Section]
     defined_terms: dict[str, DefinedTerm]
+    structure: StructureReport | None = None
 
 
 class AlignMethod(Enum):

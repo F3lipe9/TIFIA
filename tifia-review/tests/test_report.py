@@ -6,9 +6,10 @@ import pytest
 from tifia_review.classifier import FILL_IN_CATEGORY, NOT_CLASSIFIED
 from tifia_review.models import (
     AlignMethod, Alignment, ChangeType, Deviation, Document, LabeledDeviation, Page, Section,
-    SegmentedDocument,
+    SegmentedDocument, StructureReport,
 )
 from tifia_review.report import builder
+from tifia_review.pipeline import structure_warning
 from tifia_review.report.builder import (
     build_report_data, change_snippet, find_browser, render_html, render_pdf, word_diff,
 )
@@ -136,6 +137,16 @@ def test_html_has_every_part_and_the_prototype_warning():
     assert "not been classified" not in html
     unclassified = render_html(_data([LabeledDeviation(_dev(1), NOT_CLASSIFIED, True, "")]))
     assert "not been classified" in unclassified
+    assert "Document structure partly unrecovered" not in html
+
+
+def test_degraded_structure_is_on_the_cover():
+    report = StructureReport(39, 38, ["3"], ["24"], 0.999, "degraded")
+    data = _data(_labeled())
+    data.meta["structure_warning"] = structure_warning(report)
+    html = render_html(data)
+    assert ("Document structure partly unrecovered: 1 section could not be located. "
+            "Citations for nearby changes may be imprecise.") in html
 
 
 # --- PDF -------------------------------------------------------------------------------

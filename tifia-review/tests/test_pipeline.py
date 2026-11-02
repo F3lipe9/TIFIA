@@ -12,7 +12,7 @@ from tifia_review.report.builder import find_browser
 from tifia_review.store import RunStore
 
 STAGES = ["load_template", "load_executed", "segment_template", "segment_executed", "align",
-          "diff", "classify"]
+          "diff", "classify", "structure"]
 
 
 class QuotingClient(LLMClient):
@@ -58,6 +58,10 @@ def test_pipeline_saves_every_stage_and_the_report(tmp_path):
     assert result.run_dir == tmp_path / "outputs" / "test" / "fx_03_modified"
     store = RunStore(tmp_path / "outputs", "test/fx_03_modified")
     assert all(store.exists(stage) for stage in STAGES)
+    structure = json.loads(store.path("structure").read_text(encoding="utf-8"))
+    assert structure["executed"]["status"] == structure["template"]["status"] == "complete"
+    assert result.structure.summary_line("fx_03_modified") == (
+        "fx_03_modified: 39/39 sections (39 numbered), coverage 100.0%")
     assert (result.run_dir / "report.html").exists() and (result.run_dir / "report.pdf").exists()
     assert result.pdf == (tmp_path / "outputs" / "reports"
                           / "fx_03_modified__vs__tla_template_2023_public_project_revenue.pdf")
