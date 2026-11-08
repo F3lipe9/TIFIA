@@ -29,6 +29,23 @@ of a compound word ("well-being", "Semi-Annual", "non-appealable", "Anti-Corrupt
   header-zone lines that repeat on at least 30% of pages]
 - Omnibus amendment: running header "Omnibus Amendment". [loader, same rule]
 - Templates: no running header; page numbers only.
+- I-81 drafts: "ERRATA COPY/VERSION" printed at the **top** of every page, but PyMuPDF
+  returns it as the page's **last** line, so the first-lines rule missed it (it caused 16
+  false deviations on I-81 Regular body: 513 -> 497). The one-off cover stamp
+  "NRF Draft 10/14/2022" is kept.
+- HRTAC draft: no printed page numbers in the body. The only footer is a package stamp,
+  "Exhibit J-5" on pp. 7-107 and "Exhibit I - 1" on pp. 4 and 6, which was being read as
+  the page label. Citations now fall back to "PDF p. N".
+- [loader, since Nov 7: margin text is found **by position**, not extraction order. A
+  line whose centre is in the top or bottom 8% of the page is margin text (headers end
+  above ~40pt, footers start below ~727pt, body text spans ~70-721pt of 792). Margin lines
+  repeating on at least 30% of pages are removed, by shape (digits masked) or, for a
+  label-like line, by exact text (a constant "label" is a stamp, not a page number); a
+  malformed variant of a stamp ("Exhibit I - 1") is removed too. The page number or exhibit
+  label nearest the page edge becomes printed_label. One-off margin text ("EXECUTION
+  VERSION", "[Signature page to ...]", the "TIFIA Loan Amortization Schedule" table
+  title) stays in the text. Pages with nothing in either margin keep the old first-lines
+  rule. Output for the templates, fixtures and Sound Transit agreements is unchanged.]
 - Layout notes in the text: "[The remainder of this page intentionally left blank]",
   "[Signature page follows]", and in the template's Exhibit H-2 "[Do not delete - this
   paragraph generates the automatic page number]". [normalizer drops these lines]

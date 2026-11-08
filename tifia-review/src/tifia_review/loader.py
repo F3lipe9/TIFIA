@@ -50,6 +50,84 @@ def find_printed_label(text: str) -> str | None:
     return _footer_label(text)
 
 
+# Margin bands, by page position. In every document so far, running headers sit above
+# y = 40pt and footers below y = 727pt of a 792pt page, while body text spans about
+# 70-721pt, so a line whose vertical centre is in the top or bottom 8% is margin text.
+# Position matters because extraction order does not: I-81's "ERRATA COPY/VERSION" is
+# printed at the top of each page but PyMuPDF returns it as the page's last line.
+_BAND = 0.08
+_STAMP_FAMILY = re.compile(r"(?<![A-Za-z])[A-Z]{1,2}(?=-)|\d")
+
+
+def _norm(line: str) -> str:
+    """Line with spaces collapsed and none around hyphens: "Exhibit I - 1" -> "Exhibit I-1"."""
+    return re.sub(r"\s*-\s*", "-", " ".join(line.split()))
+
+
+def _family(line: str) -> str:
+    """Stamp family: exhibit letters and digits masked, "Exhibit J-5" -> "Exhibit ?-#"."""
+    return _STAMP_FAMILY.sub(lambda m: "#" if m.group().isdigit() else "?", _norm(line))
+
+
+def band_lines(page: "pymupdf.Page") -> list[tuple[str, float]]:
+    """(text, distance from the nearest page edge) for lines in the top or bottom band."""
+    height = page.rect.height
+    out = []
+    for block in page.get_text("dict")["blocks"]:
+        for line in block.get("lines", []):
+            text = "".join(span["text"] for span in line["spans"]).strip()
+            if not text:
+                continue
+            centre = (line["bbox"][1] + line["bbox"][3]) / 2
+            if centre < _BAND * height:
+                out.append((text, centre))
+            elif centre > (1 - _BAND) * height:
+                out.append((text, height - centre))
+    return out
+
+
+class MarginRules:
+    """What to do with margin-band text in one document.
+
+    A band line is removed when it repeats on many pages: by shape (digits masked, e.g.
+    "AMERICAS/2021334248.6", "ERRATA COPY/VERSION"), or, for a label-like line, by exact
+    text (HRTAC's "Exhibit J-5" stamp on 101 pages is not a page number). A malformed
+    variant of such a stamp ("Exhibit I - 1", which is not a valid label as printed) is a
+    stamp too; a well-formed label like "Exhibit A-1" is only removed if its exact text
+    repeats, so real exhibit page labels survive. Everything else in the band stays in
+    the text, except the page label, which is moved to printed_label.
+    """
+
+    def __init__(self, pages: list[list[tuple[str, float]]]):
+        min_pages = max(3, int(len(pages) * _RUNNING_MIN_SHARE))
+        shapes = Counter(s for p in pages for s in {_shape(t) for t, _ in p})
+        exact = Counter(s for p in pages for s in {_norm(t) for t, _ in p})
+        self.running = {s for s, n in shapes.items() if n >= min_pages
+                        and not _PAGE_LABEL.match(s.replace("#", "1"))}
+        self.stamps = {s for s, n in exact.items() if n >= min_pages and _PAGE_LABEL.match(s)}
+        self.stamp_families = {_family(s) for s in self.stamps}
+
+    def is_running(self, line: str) -> bool:
+        if _shape(line) in self.running or _norm(line) in self.stamps:
+            return True
+        return not _PAGE_LABEL.match(line.strip()) and _family(line) in self.stamp_families
+
+    def split(self, text: str, band: list[tuple[str, float]]) -> tuple[str | None, str]:
+        """(printed label, text without the label and the running band lines)."""
+        drop = [t for t, _ in band if self.is_running(t)]
+        labels = sorted((edge, t) for t, edge in band
+                        if not self.is_running(t) and _PAGE_LABEL.match(t))
+        label = labels[0][1] if labels else None  # the one nearest the page edge
+        if label is not None:
+            drop.append(label)
+        lines = text.splitlines(keepends=True)
+        for target in drop:
+            hits = [n for n, ln in enumerate(lines) if ln.strip() == target]
+            if hits:  # the occurrence nearest the start or end of the extracted text
+                del lines[min(hits, key=lambda n: min(n, len(lines) - 1 - n))]
+        return label, "".join(lines)
+
+
 def find_running_lines(texts: list[str]) -> set[str]:
     """Shapes of header-zone lines that repeat across many pages of one document."""
     counts = Counter(shape for t in texts for shape in {_shape(ln) for ln in _header_zone(t)})
@@ -98,17 +176,25 @@ class DocumentLoader:
             if pdf.needs_pass:
                 raise ValueError(f"{doc_id}: PDF is password-protected")
             texts = [pdf_page.get_text() for pdf_page in pdf]
+            bands = [band_lines(pdf_page) for pdf_page in pdf]
 
         if not texts:
             raise ValueError(f"{doc_id}: PDF has no pages")
 
+        margins = MarginRules(bands)
         running = find_running_lines(texts)
-        if running:
-            log.info("%s: removing running header lines %s", doc_id, sorted(running))
+        if margins.running or margins.stamp_families or running:
+            log.info("%s: removing margin lines %s, stamps %s, header-zone lines %s", doc_id,
+                     sorted(margins.running), sorted(margins.stamp_families), sorted(running))
 
         pages = []
-        for i, raw in enumerate(texts, start=1):
-            label, text = split_header(raw, running)
+        for i, (raw, band) in enumerate(zip(texts, bands), start=1):
+            # Margin text found by position decides; pages with nothing in either band
+            # keep the text-order rule (first lines, or the last line, see _HEADER_LINES).
+            if band:
+                label, text = margins.split(raw, band)
+            else:
+                label, text = split_header(raw, running)
             pages.append(Page(
                 pdf_index=i,
                 printed_label=label,

@@ -101,3 +101,58 @@ def test_split_header_only_touches_header_zone():
     label, body = split_header(text, running)
     assert label == "2"
     assert body == "body line\nST Federal Way Loan Agreement \n"
+
+
+def make_margin_pdf(path: Path, pages: list[tuple[str, str, str]]) -> str:
+    """One page per (top margin, body, bottom margin). The top line is written last, so
+    PyMuPDF returns it after the body, as with I-81's "ERRATA COPY/VERSION"."""
+    with pymupdf.open() as pdf:
+        for top, body, bottom in pages:
+            page = pdf.new_page(width=612, height=792)  # US Letter, like the agreements
+            page.insert_textbox(pymupdf.Rect(72, 72, 540, 700), body, fontsize=11)
+            if bottom:
+                page.insert_text((290, 745), bottom, fontsize=11)
+            if top:
+                page.insert_text((240, 35), top, fontsize=11)
+        pdf.save(path)
+    return str(path)
+
+
+def test_repeated_top_margin_line_removed_even_when_extracted_last(tmp_path):
+    pages = [("ERRATA COPY/VERSION", PROSE, str(n)) for n in range(1, 6)]
+    pages[0] = ("EXECUTION VERSION", PROSE, "1")  # a one-off margin line stays
+    doc = DocumentLoader().load(make_margin_pdf(tmp_path / "e.pdf", pages), "e", "executed")
+    assert [p.printed_label for p in doc.pages] == ["1", "2", "3", "4", "5"]
+    assert not any("ERRATA" in p.text for p in doc.pages[1:])
+    assert "EXECUTION VERSION" in doc.pages[0].text
+    assert all(p.text.strip().startswith("The Borrower") for p in doc.pages[1:])
+
+
+def test_constant_label_like_stamp_is_not_a_page_number(tmp_path):
+    # HRTAC: every body page's only footer is "Exhibit J-5"; the TOC pages say "Exhibit I - 1"
+    pages = ([("", PROSE, "Exhibit I - 1")] * 2 + [("", PROSE, "Exhibit J-5")] * 6
+             + [("", PROSE, "Exhibit A-1"), ("", PROSE, "Exhibit A-2")])
+    doc = DocumentLoader().load(make_margin_pdf(tmp_path / "s.pdf", pages), "s", "executed")
+    assert [p.printed_label for p in doc.pages[:8]] == [None] * 8
+    assert not any("Exhibit" in p.text for p in doc.pages)
+    assert [p.printed_label for p in doc.pages[8:]] == ["Exhibit A-1", "Exhibit A-2"]
+
+
+I81 = ROOT / "data" / "agreements" / "tla_2022_ctb_i81_regular_draft_body.pdf"
+HRTAC = ROOT / "data" / "agreements" / "tla_2025_hrtac_draft_body.pdf"
+
+
+@pytest.mark.skipif(not I81.exists(), reason="agreement not present")
+def test_i81_errata_stamp_removed_and_page_numbers_kept():
+    doc = DocumentLoader().load(str(I81), "i81", "executed")
+    assert not any("ERRATA COPY/VERSION" in p.text for p in doc.pages)
+    assert doc.pages[9].printed_label == "6"
+
+
+@pytest.mark.skipif(not HRTAC.exists(), reason="agreement not present")
+def test_hrtac_exhibit_stamp_removed_and_not_used_as_page_number():
+    doc = DocumentLoader().load(str(HRTAC), "hrtac", "executed")
+    assert not any(p.printed_label and p.printed_label.startswith("Exhibit") for p in doc.pages)
+    assert not any(ln.strip() in ("Exhibit J-5", "Exhibit I - 1")
+                   for p in doc.pages for ln in p.text.splitlines())
+    assert doc.pages[1].printed_label == "i"  # real TOC numbers still read
